@@ -75,6 +75,12 @@ Run an offline cursor-control demo:
 .\.venv\Scripts\python.exe pipeline.py demo --subject A03 --model riemann --targets 12
 ```
 
+Run an interactive live-style replay GUI without EEG hardware:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py replay-live --subject A03 --model riemann_fbcsp_vote --targets 12
+```
+
 Run a live LSL demo with a real EEG stream:
 
 ```powershell
@@ -254,11 +260,14 @@ The project already includes live-demo infrastructure using Lab Streaming Layer 
 The repository now supports the first two practical live steps:
 
 ```text
+replay-live      -> interactive live-style GUI using held-out Dataset 2a EEG
 calibrate-record -> saves processed/personal_calibration.npz
 calibrate-gui    -> arrow/cue GUI for the same calibration dataset
 calibrate-train  -> saves models/personal_riemann.joblib
 live-demo --calibration-model models/personal_riemann.joblib
 ```
+
+`replay-live` is useful before hardware is available: it trains on a subject's Dataset 2a calibration file, replays held-out evaluation trials as if they were a live EEG stream, decodes sliding windows, and moves a cursor in a GUI.
 
 The personal calibration workflow supports an explicit `rest` class by default. In live cursor control, `rest` maps to zero velocity, so the model is no longer forced to always output a movement command. The live demo also supports probability smoothing and confidence thresholding, which helps prevent noisy low-confidence windows from moving the cursor.
 

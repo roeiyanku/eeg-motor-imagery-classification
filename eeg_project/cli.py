@@ -141,6 +141,22 @@ def build_parser() -> argparse.ArgumentParser:
     live_demo.add_argument("--duration", type=float, help="Optional run duration in seconds. Defaults to until Ctrl+C.")
     live_demo.add_argument("--stream-timeout", type=float, default=10.0)
 
+    replay = subparsers.add_parser(
+        "replay-live",
+        help="Interactive live-style cursor GUI replaying held-out Dataset 2a EEG.",
+    )
+    replay.add_argument("--subject", default="A03", help="Subject ID, e.g. A03.")
+    replay.add_argument("--model", choices=list(DECODER_NAMES), default="riemann_fbcsp_vote")
+    replay.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    replay.add_argument("--targets", type=int, default=12)
+    replay.add_argument("--window-seconds", type=float, default=2.0)
+    replay.add_argument("--step-seconds", type=float, default=0.12)
+    replay.add_argument("--speed", type=float, default=0.16)
+    replay.add_argument("--smoothing-windows", type=int, default=5)
+    replay.add_argument("--confidence-threshold", type=float, default=0.0)
+    replay.add_argument("--timeout-windows", type=int, default=45)
+    replay.add_argument("--seed", type=int, default=0)
+
     rec = subparsers.add_parser(
         "calibrate-record",
         help="Record a personal cued calibration dataset from an LSL EEG stream.",
@@ -363,6 +379,24 @@ def live_demo(args: argparse.Namespace) -> None:
         raise SystemExit(1) from exc
 
 
+def replay_live(args: argparse.Namespace) -> None:
+    from .replay_gui import run_replay_gui
+
+    run_replay_gui(
+        subject=args.subject.upper(),
+        model=args.model,
+        data_dir=args.data_dir,
+        n_targets=args.targets,
+        win_seconds=args.window_seconds,
+        step_seconds=args.step_seconds,
+        speed=args.speed,
+        smoothing_windows=args.smoothing_windows,
+        confidence_threshold=args.confidence_threshold,
+        timeout_windows=args.timeout_windows,
+        seed=args.seed,
+    )
+
+
 def calibrate_record(args: argparse.Namespace) -> None:
     try:
         record_lsl_calibration(
@@ -425,6 +459,8 @@ def main() -> None:
         demo(args)
     elif args.command == "live-demo":
         live_demo(args)
+    elif args.command == "replay-live":
+        replay_live(args)
     elif args.command == "calibrate-record":
         calibrate_record(args)
     elif args.command == "calibrate-gui":
