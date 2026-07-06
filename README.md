@@ -1,88 +1,233 @@
 # EEG Motor Imagery Classification
 
-This project explores motor-imagery classification from EEG signals using the BCI Competition IV Dataset 2a. The goal is to classify which movement a participant imagines: left hand, right hand, both feet, or tongue.
+This project classifies motor-imagery EEG trials from **BCI Competition IV Dataset 2a**. The four classes are imagined movement of the left hand, right hand, both feet, and tongue.
 
-## Project Goals
+The project has two goals:
 
-- Load and inspect EEG recordings in GDF format.
-- Preprocess EEG signals for motor-imagery classification.
-- Compare classical machine-learning models such as Logistic Regression, SVM, and Random Forest.
-- Compare classical models with a CNN-based approach.
-- Analyze which preprocessing and feature-extraction choices improve performance.
+1. Build a reliable benchmark pipeline for Dataset 2a.
+2. Use the best decoder as a foundation for a future real-time personal BCI demo.
 
 ## Dataset
 
-The project uses BCI Competition IV Dataset 2a.
+Dataset 2a contains 9 subjects. Each subject has:
 
-- 9 subjects: `A01` to `A09`
-- Training and evaluation sessions for each subject
+- a labeled calibration recording: `A01T.gdf` ... `A09T.gdf`
+- an evaluation recording: `A01E.gdf` ... `A09E.gdf`
+- official evaluation labels stored locally in `true_labels/`
 - 22 EEG channels and 3 EOG channels
-- 250 Hz sampling frequency
-- 4 motor-imagery classes
 
-Download page: https://www.bbci.de/competition/iv/#dataset2a
+Important event codes:
 
-Place the GDF files in:
+```text
+769 = left hand
+770 = right hand
+771 = both feet
+772 = tongue
+783 = unknown cue in evaluation files
+```
+
+Raw `.gdf` files should be placed in:
 
 ```text
 BCICIV_2a_gdf/
 ```
 
-The raw `.gdf` files are intentionally ignored by Git because they are large data files. Keep them locally, or document a separate download step for collaborators.
+The raw EEG files are ignored by Git because they are large dataset files.
 
 ## Setup
-
-Create and activate a virtual environment:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```powershell
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-## Run
-
-Inspect the default file, `BCICIV_2a_gdf/A01E.gdf`:
+In this workspace, the project was run with:
 
 ```powershell
-python pipeline.py
+.\.venv\Scripts\python.exe
 ```
 
-Inspect a specific file:
+## Main Commands
+
+Inspect a raw GDF file:
 
 ```powershell
-python pipeline.py BCICIV_2a_gdf/A01T.gdf
+.\.venv\Scripts\python.exe pipeline.py inspect BCICIV_2a_gdf/A01T.gdf
 ```
 
-Open the interactive MNE plot:
+Prepare the labeled training epochs:
 
 ```powershell
-python pipeline.py BCICIV_2a_gdf/A01T.gdf --preload --plot
+.\.venv\Scripts\python.exe pipeline.py prepare
 ```
 
-## Planned Workflow
+Run the official train-T/test-E benchmark:
 
-1. Load GDF files with MNE.
-2. Extract events and labels from annotations.
-3. Apply EEG preprocessing, including filtering and epoching.
-4. Extract features such as band power or CSP features.
-5. Train and evaluate classical ML models.
-6. Train and evaluate a CNN baseline.
-7. Compare results across models and subjects.
+```powershell
+.\.venv\Scripts\python.exe pipeline.py benchmark --models riemann fbcsp riemann_fbcsp_vote
+```
 
-## Repository Contents
+Run an offline cursor-control demo:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py demo --subject A03 --model riemann --targets 12
+```
+
+Run a live LSL demo with a real EEG stream:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py live-demo --subject A03 --model riemann
+```
+
+## Preprocessing
+
+The default EEG preprocessing pipeline:
+
+- loads `.gdf` files with MNE
+- marks EOG channels
+- keeps the 22 EEG channels
+- excludes the 3 EOG channels from model input
+- filters EEG to 8-30 Hz for motor-imagery mu/beta rhythms
+- resamples to 125 Hz
+- extracts epochs from 0.5s to 4.0s after cue onset
+- maps labels to `left_hand`, `right_hand`, `feet`, and `tongue`
+
+For benchmark experiments, the raw recordings are first loaded as broadband 4-40 Hz epochs, and each decoder applies its own internal filtering.
+
+## Implemented Models
+
+Classical models:
+
+- CSP + Logistic Regression
+- CSP + SVM
+- CSP + Random Forest
+- CSP + LDA
+- FBCSP + mutual-information feature selection + shrinkage LDA
+- Riemannian filter-bank tangent-space decoder
+- Riemannian variants with wider filter banks and logistic regression
+- `riemann_fbcsp_vote`: soft-vote ensemble of Riemannian + FBCSP
+
+Neural models:
+
+- compact EEGNet-style CNN
+- raw short ResNet
+- ShallowConvNet
+- EEG-TCNet
+
+## Benchmark Protocol
+
+The main benchmark follows the BCI Competition IV 2a evaluation protocol:
 
 ```text
-.
-├── pipeline.py
-├── requirements.txt
-├── README.md
-├── desc_2a.pdf
-└── BCICIV_2a_gdf/        # local dataset files, ignored by Git
+train on A0XT.gdf
+test on A0XE.gdf
+score using true_labels/A0XE.mat
+average across 9 subjects
 ```
+
+The main score is **Cohen's kappa**, because it corrects accuracy for chance agreement. For 4 balanced classes, random guessing is around 25% accuracy, so kappa is more informative than raw accuracy alone.
+
+The 2008 competition winner, Ang et al.'s FBCSP method, reported approximately:
+
+```text
+mean kappa ~= 0.57
+```
+
+## Current Results
+
+Main 9-subject benchmark:
+
+```text
+model             mean accuracy   mean kappa
+riemann           0.712           0.616
+fbcsp             0.675           0.566
+shallow_convnet   0.627           0.503
+```
+
+Best result after adding a soft-vote ensemble:
+
+```text
+model                 mean accuracy   mean kappa
+riemann_fbcsp_vote    0.735           0.647
+```
+
+This is the strongest result so far and is clearly above the 2008 FBCSP reference kappa of about 0.57.
+
+Saved result tables:
+
+```text
+results/benchmark_all_subjects_riemann_fbcsp_vote.csv
+results/benchmark_all_subjects_riemann_fbcsp_shallow_convnet.csv
+results/benchmark_all_subjects_riemann_wide_lr.csv
+```
+
+## What Worked
+
+The strongest methods were classical EEG-specific methods:
+
+- Riemannian tangent-space decoding
+- FBCSP
+- a soft-vote ensemble of both
+
+These worked well because Dataset 2a is relatively small: each subject has 288 calibration trials, or about 72 trials per class. Classical spatial-filtering methods are data-efficient and encode useful EEG structure directly.
+
+## What Worked Less Well
+
+Deep learning models were useful experiments, but they did not beat the classical methods on average.
+
+ShallowConvNet was the best neural baseline, but it was less stable across subjects. EEG-TCNet ran correctly but was not competitive in its first untuned version.
+
+This is a meaningful result: for low-data motor-imagery EEG, a well-designed classical pipeline can outperform more complex neural networks.
+
+## Challenges
+
+Important challenges during the project:
+
+- preserving a fair train-T/test-E benchmark protocol
+- avoiding accidental data leakage
+- dealing with subject-to-subject variability
+- handling limited data for deep learning
+- memory issues when running MNE/OpenBLAS over all subjects in one long process
+- deciding between benchmark performance and future live-BCI usability
+
+The memory issue was handled by running subject-level benchmarks in fresh Python processes and limiting BLAS thread counts:
+
+```powershell
+$env:OPENBLAS_NUM_THREADS='1'
+$env:OMP_NUM_THREADS='1'
+$env:MKL_NUM_THREADS='1'
+```
+
+## Live BCI Direction
+
+The project already includes live-demo infrastructure using Lab Streaming Layer (LSL). The future personal BCI workflow is:
+
+1. collect personal calibration EEG with labeled cues
+2. train a decoder on the same user and headset
+3. add a `rest` / `no-control` class
+4. use sliding windows for real-time prediction
+5. smooth predictions over recent windows
+6. drive a cursor or command interface
+
+For a real-time system, `riemann` is the simplest strong decoder. `riemann_fbcsp_vote` is the best benchmark model, but it is heavier because it runs two decoders.
+
+## Report / Submission Notes
+
+A detailed professor-facing project history is in:
+
+```text
+PROJECT_HISTORY.md
+```
+
+It includes:
+
+- dataset description
+- research questions
+- code summary
+- algorithms tested
+- benchmark results
+- challenges and how they were handled
+- discussion of what worked and what did not
+- future live-BCI direction

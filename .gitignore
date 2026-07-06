@@ -15,3 +15,5 @@ BCICIV_2a_gdf/*.gdf
 outputs/
 figures/
 models/
+processed/
+results/

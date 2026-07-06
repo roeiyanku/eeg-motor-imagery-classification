@@ -1,0 +1,212 @@
+"""Decoding pipelines for BCI Competition IV 2a.
+
+This module provides the decoders used for the competition-style benchmark:
+
+- ``csp_lda``   : single-band (8-30 Hz) CSP + LDA baseline.
+- ``fbcsp``     : Filter Bank CSP + mutual-information feature selection + LDA.
+                  This reproduces the family of methods that won the 2008
+                  competition (Ang et al., FBCSP, kappa ~0.57).
+- ``riemann``   : spatial-covariance + Riemannian tangent space + logistic
+                  regression, a strong modern classical decoder.
+
+All decoders expect broadband epochs shaped ``(trials, channels, samples)`` and
+apply their own band-pass filtering internally, so a single broadband epoch set
+(e.g. 4-40 Hz) can feed every decoder.
+"""
+from __future__ import annotations
+
+import numpy as np
+from mne.decoding import CSP
+from scipy.signal import butter, sosfiltfilt
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.ensemble import VotingClassifier
+from sklearn.feature_selection import SelectKBest, mutual_info_classif
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+# Motor-relevant sub-bands (mu + beta) used by the filter-bank tangent-space
+# decoder. Splitting 8-30 Hz into narrow bands lets the tangent-space features
+# capture band-specific spatial covariance structure, which is the standard way
+# to push Riemannian decoding above the single-band baseline on 2a.
+RIEMANN_BANDS: tuple[tuple[float, float], ...] = (
+    (8, 12),
+    (12, 16),
+    (16, 20),
+    (20, 24),
+    (24, 30),
+)
+
+# Standard FBCSP filter bank: nine overlapping 4 Hz-wide sub-bands from 4-40 Hz.
+DEFAULT_BANDS: tuple[tuple[float, float], ...] = (
+    (4, 8),
+    (8, 12),
+    (12, 16),
+    (16, 20),
+    (20, 24),
+    (24, 28),
+    (28, 32),
+    (32, 36),
+    (36, 40),
+)
+
+
+def _bandpass(X: np.ndarray, sfreq: float, low: float, high: float, order: int = 4) -> np.ndarray:
+    """Zero-phase Butterworth band-pass along the last (time) axis."""
+    nyq = sfreq / 2.0
+    high = min(high, nyq - 1e-3)
+    sos = butter(order, [low / nyq, high / nyq], btype="bandpass", output="sos")
+    return sosfiltfilt(sos, X, axis=-1).astype(np.float64)
+
+
+class BandPass(BaseEstimator, TransformerMixin):
+    """Fixed band-pass filter as a scikit-learn transformer step."""
+
+    def __init__(self, sfreq: float, low: float = 8.0, high: float = 30.0):
+        self.sfreq = sfreq
+        self.low = low
+        self.high = high
+
+    def fit(self, X, y=None):  # noqa: D102
+        return self
+
+    def transform(self, X):  # noqa: D102
+        return _bandpass(np.asarray(X, dtype=np.float64), self.sfreq, self.low, self.high)
+
+
+class FBCSP(BaseEstimator, TransformerMixin):
+    """Filter Bank Common Spatial Pattern feature extractor.
+
+    Fits an independent multiclass CSP in each sub-band and concatenates the
+    log-variance features. Feature selection (MIBIF-style) is left to a following
+    ``SelectKBest`` step in the pipeline.
+    """
+
+    def __init__(self, sfreq: float, bands=DEFAULT_BANDS, n_components: int = 4):
+        self.sfreq = sfreq
+        self.bands = bands
+        self.n_components = n_components
+
+    def fit(self, X, y):  # noqa: D102
+        self.csps_ = []
+        for low, high in self.bands:
+            Xb = _bandpass(X, self.sfreq, low, high)
+            csp = CSP(n_components=self.n_components, reg="ledoit_wolf", log=True, norm_trace=False)
+            csp.fit(Xb, y)
+            self.csps_.append(csp)
+        return self
+
+    def transform(self, X):  # noqa: D102
+        feats = []
+        for (low, high), csp in zip(self.bands, self.csps_):
+            Xb = _bandpass(X, self.sfreq, low, high)
+            feats.append(csp.transform(Xb))
+        return np.concatenate(feats, axis=1)
+
+
+class FilterBankTangentSpace(BaseEstimator, TransformerMixin):
+    """Filter-bank Riemannian tangent-space feature extractor.
+
+    For each sub-band it band-passes the signal, estimates a per-trial spatial
+    covariance matrix, and projects it to the Riemannian tangent space. The
+    per-band tangent vectors are concatenated into a single feature vector, so a
+    plain (shrinkage) linear classifier can exploit band-specific covariance
+    structure. This generalises the single-band ``Covariances -> TangentSpace``
+    decoder and is the usual way to lift Riemannian decoding on 2a.
+    """
+
+    def __init__(self, sfreq: float, bands=RIEMANN_BANDS, estimator: str = "oas"):
+        self.sfreq = sfreq
+        self.bands = bands
+        self.estimator = estimator
+
+    def fit(self, X, y=None):  # noqa: D102
+        from pyriemann.estimation import Covariances
+        from pyriemann.tangentspace import TangentSpace
+
+        self.pipes_ = []
+        for low, high in self.bands:
+            Xb = _bandpass(X, self.sfreq, low, high)
+            cov = Covariances(estimator=self.estimator)
+            covs = cov.fit_transform(Xb)
+            ts = TangentSpace().fit(covs)
+            self.pipes_.append((cov, ts))
+        return self
+
+    def transform(self, X):  # noqa: D102
+        feats = []
+        for (low, high), (cov, ts) in zip(self.bands, self.pipes_):
+            Xb = _bandpass(X, self.sfreq, low, high)
+            feats.append(ts.transform(cov.transform(Xb)))
+        return np.concatenate(feats, axis=1)
+
+
+def build_decoder(name: str, sfreq: float, random_state: int = 42) -> Pipeline:
+    """Return a fresh, unfitted decoding pipeline for the given name."""
+    if name == "csp_lda":
+        return Pipeline(
+            [
+                ("band", BandPass(sfreq, 8.0, 30.0)),
+                ("csp", CSP(n_components=8, reg="ledoit_wolf", log=True, norm_trace=False)),
+                ("lda", LinearDiscriminantAnalysis()),
+            ]
+        )
+    if name == "fbcsp":
+        return Pipeline(
+            [
+                ("fbcsp", FBCSP(sfreq, n_components=4)),
+                ("select", SelectKBest(mutual_info_classif, k=24)),
+                ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
+            ]
+        )
+    if name == "riemann":
+        return Pipeline(
+            [
+                ("fbts", FilterBankTangentSpace(sfreq, RIEMANN_BANDS, estimator="oas")),
+                ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
+            ]
+        )
+    if name == "riemann_wide":
+        return Pipeline(
+            [
+                ("fbts", FilterBankTangentSpace(sfreq, DEFAULT_BANDS, estimator="oas")),
+                ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
+            ]
+        )
+    if name == "riemann_lr":
+        return Pipeline(
+            [
+                ("fbts", FilterBankTangentSpace(sfreq, RIEMANN_BANDS, estimator="oas")),
+                ("scale", StandardScaler()),
+                ("clf", LogisticRegression(max_iter=2000, C=1.0, random_state=random_state)),
+            ]
+        )
+    if name == "riemann_wide_lr":
+        return Pipeline(
+            [
+                ("fbts", FilterBankTangentSpace(sfreq, DEFAULT_BANDS, estimator="oas")),
+                ("scale", StandardScaler()),
+                ("clf", LogisticRegression(max_iter=2000, C=1.0, random_state=random_state)),
+            ]
+        )
+    if name == "riemann_fbcsp_vote":
+        return VotingClassifier(
+            estimators=[
+                ("riemann", build_decoder("riemann", sfreq, random_state)),
+                ("fbcsp", build_decoder("fbcsp", sfreq, random_state)),
+            ],
+            voting="soft",
+        )
+    raise ValueError(f"Unknown decoder: {name}")
+
+
+DECODER_NAMES = (
+    "csp_lda",
+    "fbcsp",
+    "riemann",
+    "riemann_wide",
+    "riemann_lr",
+    "riemann_wide_lr",
+    "riemann_fbcsp_vote",
+)

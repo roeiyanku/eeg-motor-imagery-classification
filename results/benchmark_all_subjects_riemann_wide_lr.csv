@@ -1,0 +1,10 @@
+model,subject,accuracy,kappa
+riemann_wide_lr,A01,0.868,0.824
+riemann_wide_lr,A02,0.493,0.324
+riemann_wide_lr,A03,0.788,0.718
+riemann_wide_lr,A04,0.681,0.574
+riemann_wide_lr,A05,0.556,0.407
+riemann_wide_lr,A06,0.566,0.421
+riemann_wide_lr,A07,0.830,0.773
+riemann_wide_lr,A08,0.812,0.750
+riemann_wide_lr,A09,0.785,0.713
