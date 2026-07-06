@@ -107,6 +107,8 @@ def run_live_lsl(
     win_seconds: float = 2.0,
     step_seconds: float = 0.12,
     speed: float = 0.16,
+    smoothing_windows: int = 5,
+    confidence_threshold: float = 0.0,
     duration: float | None = None,
     stream_timeout: float = 10.0,
 ) -> None:
@@ -148,6 +150,7 @@ def run_live_lsl(
     inlet = StreamInlet(info, max_chunklen=max(1, int(step_seconds * stream_sfreq)))
     buffer = RollingEegBuffer(n_channels=len(channel_indices), n_samples=win)
     cursor = np.zeros(2, dtype=np.float64)
+    probs_history: deque[np.ndarray] = deque(maxlen=max(1, smoothing_windows))
     next_decode = time.monotonic()
     start_time = time.monotonic()
 
@@ -162,22 +165,27 @@ def run_live_lsl(
 
             window = buffer.window()[None, :, :]
             probs = decoder.predict_proba(window)[0]
-            decoded = int(np.argmax(probs))
+            probs_history.append(probs)
+            smooth_probs = np.mean(np.stack(probs_history), axis=0)
+            confidence = float(np.max(smooth_probs))
+            decoded = int(np.argmax(smooth_probs))
             velocity = np.zeros(2, dtype=np.float64)
-            for class_idx, prob in enumerate(probs):
-                if class_idx < len(class_names):
-                    velocity += prob * movement_vector(class_names[class_idx])
-                elif class_idx in CLASS_DIRECTION:
-                    velocity += prob * CLASS_DIRECTION[class_idx]
+            if confidence >= confidence_threshold:
+                for class_idx, prob in enumerate(smooth_probs):
+                    if class_idx < len(class_names):
+                        velocity += prob * movement_vector(class_names[class_idx])
+                    elif class_idx in CLASS_DIRECTION:
+                        velocity += prob * CLASS_DIRECTION[class_idx]
             cursor = np.clip(cursor + speed * velocity, -1.2, 1.2)
 
             probs_text = " ".join(
-                f"{class_names[i] if i < len(class_names) else i}={probs[i]:.2f}"
-                for i in range(len(probs))
+                f"{class_names[i] if i < len(class_names) else i}={smooth_probs[i]:.2f}"
+                for i in range(len(smooth_probs))
             )
             decoded_label = class_names[decoded] if decoded < len(class_names) else str(decoded)
             print(
                 f"decoded={decoded_label:>10s} "
+                f"conf={confidence:.2f} "
                 f"cursor=({cursor[0]:+.2f}, {cursor[1]:+.2f})  {probs_text}",
                 flush=True,
             )

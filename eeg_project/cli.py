@@ -21,7 +21,12 @@ from .data import (
 )
 from .models import evaluate_classical_subjects
 from .benchmark import BENCHMARK_MODEL_NAMES, run_benchmark
-from .calibration import DEFAULT_CALIBRATION_CLASSES, record_lsl_calibration, train_calibration_decoder
+from .calibration import (
+    DEFAULT_CALIBRATION_CLASSES,
+    record_lsl_calibration,
+    record_lsl_calibration_gui,
+    train_calibration_decoder,
+)
 from .decoders import DECODER_NAMES
 from .reporting import (
     plot_class_distribution,
@@ -113,6 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
     live_demo.add_argument("--window-seconds", type=float, default=2.0)
     live_demo.add_argument("--step-seconds", type=float, default=0.12)
     live_demo.add_argument("--speed", type=float, default=0.16)
+    live_demo.add_argument("--smoothing-windows", type=int, default=5)
+    live_demo.add_argument("--confidence-threshold", type=float, default=0.0)
     live_demo.add_argument("--duration", type=float, help="Optional run duration in seconds. Defaults to until Ctrl+C.")
     live_demo.add_argument("--stream-timeout", type=float, default=10.0)
 
@@ -129,6 +136,20 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--cue-seconds", type=float, default=1.0)
     rec.add_argument("--imagery-seconds", type=float, default=4.0)
     rec.add_argument("--stream-timeout", type=float, default=10.0)
+
+    rec_gui = subparsers.add_parser(
+        "calibrate-gui",
+        help="Record a personal calibration dataset with a simple arrow/cue GUI.",
+    )
+    rec_gui.add_argument("--output", type=Path, default=Path("processed") / "personal_calibration.npz")
+    rec_gui.add_argument("--stream-name", help="Optional exact LSL stream name. Defaults to first type=EEG stream.")
+    rec_gui.add_argument("--channels", type=int, nargs="+", help="Zero-based LSL channel indices to record.")
+    rec_gui.add_argument("--classes", nargs="+", default=list(DEFAULT_CALIBRATION_CLASSES))
+    rec_gui.add_argument("--trials-per-class", type=int, default=20)
+    rec_gui.add_argument("--rest-seconds", type=float, default=2.0)
+    rec_gui.add_argument("--cue-seconds", type=float, default=1.0)
+    rec_gui.add_argument("--imagery-seconds", type=float, default=4.0)
+    rec_gui.add_argument("--stream-timeout", type=float, default=10.0)
 
     cal_train = subparsers.add_parser(
         "calibrate-train",
@@ -295,6 +316,8 @@ def live_demo(args: argparse.Namespace) -> None:
             win_seconds=args.window_seconds,
             step_seconds=args.step_seconds,
             speed=args.speed,
+            smoothing_windows=args.smoothing_windows,
+            confidence_threshold=args.confidence_threshold,
             duration=args.duration,
             stream_timeout=args.stream_timeout,
         )
@@ -318,6 +341,24 @@ def calibrate_record(args: argparse.Namespace) -> None:
         )
     except RuntimeError as exc:
         print(f"Calibration recording error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+def calibrate_gui(args: argparse.Namespace) -> None:
+    try:
+        record_lsl_calibration_gui(
+            output=args.output,
+            stream_name=args.stream_name,
+            channel_indices=args.channels,
+            classes=tuple(args.classes),
+            trials_per_class=args.trials_per_class,
+            rest_seconds=args.rest_seconds,
+            cue_seconds=args.cue_seconds,
+            imagery_seconds=args.imagery_seconds,
+            stream_timeout=args.stream_timeout,
+        )
+    except RuntimeError as exc:
+        print(f"GUI calibration error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
 
@@ -347,6 +388,8 @@ def main() -> None:
         live_demo(args)
     elif args.command == "calibrate-record":
         calibrate_record(args)
+    elif args.command == "calibrate-gui":
+        calibrate_gui(args)
     elif args.command == "calibrate-train":
         calibrate_train(args)
     else:

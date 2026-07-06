@@ -87,6 +87,12 @@ Record a personal calibration dataset from an LSL EEG stream:
 .\.venv\Scripts\python.exe pipeline.py calibrate-record --trials-per-class 20 --channels 0 1 2 3 4 5 6 7
 ```
 
+Or use the arrow/cue GUI, which is closer to the original motor-imagery protocol:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py calibrate-gui --trials-per-class 20 --channels 0 1 2 3 4 5 6 7
+```
+
 Train a personal decoder from that calibration dataset:
 
 ```powershell
@@ -97,6 +103,12 @@ Run the live demo with your personal decoder:
 
 ```powershell
 .\.venv\Scripts\python.exe pipeline.py live-demo --calibration-model models/personal_riemann.joblib
+```
+
+For a steadier cursor, use smoothing and a confidence threshold:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py live-demo --calibration-model models/personal_riemann.joblib --smoothing-windows 8 --confidence-threshold 0.45
 ```
 
 ## Preprocessing
@@ -233,11 +245,12 @@ The repository now supports the first two practical live steps:
 
 ```text
 calibrate-record -> saves processed/personal_calibration.npz
+calibrate-gui    -> arrow/cue GUI for the same calibration dataset
 calibrate-train  -> saves models/personal_riemann.joblib
 live-demo --calibration-model models/personal_riemann.joblib
 ```
 
-The personal calibration workflow supports an explicit `rest` class by default. In live cursor control, `rest` maps to zero velocity, so the model is no longer forced to always output a movement command.
+The personal calibration workflow supports an explicit `rest` class by default. In live cursor control, `rest` maps to zero velocity, so the model is no longer forced to always output a movement command. The live demo also supports probability smoothing and confidence thresholding, which helps prevent noisy low-confidence windows from moving the cursor.
 
 For a real-time system, `riemann` is the simplest strong decoder. `riemann_fbcsp_vote` is the best benchmark model, but it is heavier because it runs two decoders.
 
