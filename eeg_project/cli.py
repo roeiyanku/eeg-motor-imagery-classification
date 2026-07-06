@@ -21,6 +21,7 @@ from .data import (
 )
 from .models import evaluate_classical_subjects
 from .benchmark import BENCHMARK_MODEL_NAMES, run_benchmark
+from .calibration import DEFAULT_CALIBRATION_CLASSES, record_lsl_calibration, train_calibration_decoder
 from .decoders import DECODER_NAMES
 from .reporting import (
     plot_class_distribution,
@@ -101,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     live_demo.add_argument("--subject", default="A03", help="Subject ID used for calibration training, e.g. A03.")
     live_demo.add_argument("--model", choices=list(DECODER_NAMES), default="riemann")
     live_demo.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    live_demo.add_argument("--calibration-model", type=Path, help="Use a saved personal calibration model instead of Dataset 2a.")
     live_demo.add_argument("--stream-name", help="Optional exact LSL stream name. Defaults to first type=EEG stream.")
     live_demo.add_argument(
         "--channels",
@@ -113,6 +115,29 @@ def build_parser() -> argparse.ArgumentParser:
     live_demo.add_argument("--speed", type=float, default=0.16)
     live_demo.add_argument("--duration", type=float, help="Optional run duration in seconds. Defaults to until Ctrl+C.")
     live_demo.add_argument("--stream-timeout", type=float, default=10.0)
+
+    rec = subparsers.add_parser(
+        "calibrate-record",
+        help="Record a personal cued calibration dataset from an LSL EEG stream.",
+    )
+    rec.add_argument("--output", type=Path, default=Path("processed") / "personal_calibration.npz")
+    rec.add_argument("--stream-name", help="Optional exact LSL stream name. Defaults to first type=EEG stream.")
+    rec.add_argument("--channels", type=int, nargs="+", help="Zero-based LSL channel indices to record.")
+    rec.add_argument("--classes", nargs="+", default=list(DEFAULT_CALIBRATION_CLASSES))
+    rec.add_argument("--trials-per-class", type=int, default=20)
+    rec.add_argument("--rest-seconds", type=float, default=2.0)
+    rec.add_argument("--cue-seconds", type=float, default=1.0)
+    rec.add_argument("--imagery-seconds", type=float, default=4.0)
+    rec.add_argument("--stream-timeout", type=float, default=10.0)
+
+    cal_train = subparsers.add_parser(
+        "calibrate-train",
+        help="Train and save a decoder from a personal calibration NPZ.",
+    )
+    cal_train.add_argument("--input", type=Path, default=Path("processed") / "personal_calibration.npz")
+    cal_train.add_argument("--output", type=Path, default=Path("models") / "personal_riemann.joblib")
+    cal_train.add_argument("--model", choices=list(DECODER_NAMES), default="riemann")
+    cal_train.add_argument("--random-state", type=int, default=42)
 
     return parser
 
@@ -264,6 +289,7 @@ def live_demo(args: argparse.Namespace) -> None:
             subject=args.subject.upper(),
             model=args.model,
             data_dir=args.data_dir,
+            calibration_model=args.calibration_model,
             stream_name=args.stream_name,
             channel_indices=args.channels,
             win_seconds=args.window_seconds,
@@ -275,6 +301,33 @@ def live_demo(args: argparse.Namespace) -> None:
     except RuntimeError as exc:
         print(f"Live demo error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
+
+
+def calibrate_record(args: argparse.Namespace) -> None:
+    try:
+        record_lsl_calibration(
+            output=args.output,
+            stream_name=args.stream_name,
+            channel_indices=args.channels,
+            classes=tuple(args.classes),
+            trials_per_class=args.trials_per_class,
+            rest_seconds=args.rest_seconds,
+            cue_seconds=args.cue_seconds,
+            imagery_seconds=args.imagery_seconds,
+            stream_timeout=args.stream_timeout,
+        )
+    except RuntimeError as exc:
+        print(f"Calibration recording error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+def calibrate_train(args: argparse.Namespace) -> None:
+    train_calibration_decoder(
+        input_path=args.input,
+        output_model=args.output,
+        model_name=args.model,
+        random_state=args.random_state,
+    )
 
 
 def main() -> None:
@@ -292,5 +345,9 @@ def main() -> None:
         demo(args)
     elif args.command == "live-demo":
         live_demo(args)
+    elif args.command == "calibrate-record":
+        calibrate_record(args)
+    elif args.command == "calibrate-train":
+        calibrate_train(args)
     else:
         raise ValueError(f"Unknown command: {args.command}")

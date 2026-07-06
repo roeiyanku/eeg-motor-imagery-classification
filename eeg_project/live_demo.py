@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import CLASS_NAMES, DATA_DIR
+from .calibration import class_names_for_dataset2a, load_calibration_model, movement_vector
 from .cursor_demo import CLASS_DIRECTION, DIRECTION_LABEL, _load_raw_epoched
 from .decoders import build_decoder
 
@@ -100,6 +101,7 @@ def run_live_lsl(
     subject: str = "A03",
     model: str = "riemann",
     data_dir: Path = DATA_DIR,
+    calibration_model: Path | None = None,
     stream_name: str | None = None,
     channel_indices: list[int] | None = None,
     win_seconds: float = 2.0,
@@ -116,13 +118,25 @@ def run_live_lsl(
         raise RuntimeError("The LSL stream does not report a fixed nominal sampling rate.")
 
     n_stream_channels = int(info.channel_count())
-    if channel_indices is None:
-        channel_indices = list(range(min(22, n_stream_channels)))
-    if len(channel_indices) != 22:
-        raise ValueError(
-            f"The decoder expects 22 EEG channels, but {len(channel_indices)} were selected. "
-            "Pass exactly 22 indices with --channels."
-        )
+    if calibration_model:
+        bundle = load_calibration_model(calibration_model)
+        decoder = bundle["decoder"]
+        class_names = list(bundle["class_names"])
+        channel_indices = list(bundle["channel_indices"])
+        win = int(round(float(bundle["window_seconds"]) * stream_sfreq))
+        print(f"Loaded personal calibration model: {calibration_model}")
+    else:
+        if channel_indices is None:
+            channel_indices = list(range(min(22, n_stream_channels)))
+        if len(channel_indices) != 22:
+            raise ValueError(
+                f"The Dataset 2a decoder expects 22 EEG channels, but {len(channel_indices)} were selected. "
+                "Pass exactly 22 indices with --channels, or use --calibration-model."
+            )
+        print(f"Training {model} decoder on {subject} at {stream_sfreq:.1f} Hz...")
+        decoder, win = train_live_decoder(subject, model, data_dir, stream_sfreq, win_seconds)
+        class_names = class_names_for_dataset2a()
+
     if max(channel_indices) >= n_stream_channels or min(channel_indices) < 0:
         raise ValueError(f"Channel indices must be between 0 and {n_stream_channels - 1}.")
 
@@ -130,11 +144,9 @@ def run_live_lsl(
         f"Connected to LSL EEG stream '{info.name()}' "
         f"({n_stream_channels} channels at {stream_sfreq:.1f} Hz)."
     )
-    print(f"Training {model} decoder on {subject} at {stream_sfreq:.1f} Hz...")
-    decoder, win = train_live_decoder(subject, model, data_dir, stream_sfreq, win_seconds)
 
     inlet = StreamInlet(info, max_chunklen=max(1, int(step_seconds * stream_sfreq)))
-    buffer = RollingEegBuffer(n_channels=22, n_samples=win)
+    buffer = RollingEegBuffer(n_channels=len(channel_indices), n_samples=win)
     cursor = np.zeros(2, dtype=np.float64)
     next_decode = time.monotonic()
     start_time = time.monotonic()
@@ -151,14 +163,21 @@ def run_live_lsl(
             window = buffer.window()[None, :, :]
             probs = decoder.predict_proba(window)[0]
             decoded = int(np.argmax(probs))
-            velocity = sum(probs[c] * CLASS_DIRECTION[c] for c in range(4))
+            velocity = np.zeros(2, dtype=np.float64)
+            for class_idx, prob in enumerate(probs):
+                if class_idx < len(class_names):
+                    velocity += prob * movement_vector(class_names[class_idx])
+                elif class_idx in CLASS_DIRECTION:
+                    velocity += prob * CLASS_DIRECTION[class_idx]
             cursor = np.clip(cursor + speed * velocity, -1.2, 1.2)
 
             probs_text = " ".join(
-                f"{CLASS_NAMES[i]}={probs[i]:.2f}" for i in range(len(CLASS_NAMES))
+                f"{class_names[i] if i < len(class_names) else i}={probs[i]:.2f}"
+                for i in range(len(probs))
             )
+            decoded_label = class_names[decoded] if decoded < len(class_names) else str(decoded)
             print(
-                f"decoded={DIRECTION_LABEL[decoded]:>5s} "
+                f"decoded={decoded_label:>10s} "
                 f"cursor=({cursor[0]:+.2f}, {cursor[1]:+.2f})  {probs_text}",
                 flush=True,
             )

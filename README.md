@@ -81,6 +81,24 @@ Run a live LSL demo with a real EEG stream:
 .\.venv\Scripts\python.exe pipeline.py live-demo --subject A03 --model riemann
 ```
 
+Record a personal calibration dataset from an LSL EEG stream:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py calibrate-record --trials-per-class 20 --channels 0 1 2 3 4 5 6 7
+```
+
+Train a personal decoder from that calibration dataset:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py calibrate-train --model riemann --output models/personal_riemann.joblib
+```
+
+Run the live demo with your personal decoder:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py live-demo --calibration-model models/personal_riemann.joblib
+```
+
 ## Preprocessing
 
 The default EEG preprocessing pipeline:
@@ -210,6 +228,16 @@ The project already includes live-demo infrastructure using Lab Streaming Layer 
 4. use sliding windows for real-time prediction
 5. smooth predictions over recent windows
 6. drive a cursor or command interface
+
+The repository now supports the first two practical live steps:
+
+```text
+calibrate-record -> saves processed/personal_calibration.npz
+calibrate-train  -> saves models/personal_riemann.joblib
+live-demo --calibration-model models/personal_riemann.joblib
+```
+
+The personal calibration workflow supports an explicit `rest` class by default. In live cursor control, `rest` maps to zero velocity, so the model is no longer forced to always output a movement command.
 
 For a real-time system, `riemann` is the simplest strong decoder. `riemann_fbcsp_vote` is the best benchmark model, but it is heavier because it runs two decoders.
 
