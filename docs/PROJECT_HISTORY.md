@@ -24,7 +24,7 @@
 - 9 נבדקים: A01 עד A09
 - לכל נבדק קובץ אימון מסומן: `A0XT.gdf`
 - לכל נבדק קובץ הערכה: `A0XE.gdf`
-- קיימים קבצי תוויות רשמיים עבור קבצי ההערכה בתיקייה `true_labels/`
+- קיימים קבצי תוויות רשמיים עבור קבצי ההערכה בתיקייה `data/true_labels/`
 - 22 ערוצי EEG ועוד 3 ערוצי EOG
 - 4 מחלקות דמיון תנועתי
 
@@ -43,7 +43,7 @@
 ```text
 train on A0XT.gdf
 test on A0XE.gdf
-score using true_labels/A0XE.mat
+score using data/true_labels/A0XE.mat
 ```
 
 המדד המרכזי הוא Cohen's kappa, בדומה לתחרות המקורית. המדד הזה מתקן עבור הצלחה מקרית. בבעיה עם 4 מחלקות, ניחוש אקראי נותן בערך 25% accuracy, ולכן kappa מתאים יותר להשוואה בין מודלים.
@@ -69,20 +69,25 @@ pipeline.py
 מודולים מרכזיים:
 
 ```text
-eeg_project/data.py        טעינה, ניקוי בסיסי, epoching, שמירת dataset מוכן
-eeg_project/decoders.py    CSP, FBCSP, Riemannian, וריאנטים ו-ensemble
-eeg_project/cnn.py         מודלים נוירוניים ב-PyTorch
-eeg_project/benchmark.py   פרוטוקול train-T/test-E הרשמי
-eeg_project/cli.py         ממשק שורת פקודה
-eeg_project/reporting.py   שמירת טבלאות, גרפים וסיכומים
-eeg_project/live_demo.py   הכנה לדמו חי דרך LSL
-eeg_project/cursor_demo.py דמו offline של שליטה בסמן
+eeg_project/cli.py                ממשק שורת פקודה
+eeg_project/io/config.py          נתיבים, שמות מחלקות ומיפויי אירועים
+eeg_project/io/data.py            טעינה, ניקוי בסיסי, epoching, שמירת dataset מוכן
+eeg_project/decoding/decoders.py  CSP, FBCSP, Riemannian, וריאנטים ו-ensemble
+eeg_project/decoding/cnn.py       מודלים נוירוניים ב-PyTorch
+eeg_project/decoding/models.py    מודלים קלאסיים (CSP + LogReg/SVM/RF)
+eeg_project/eval/benchmark.py     פרוטוקול train-T/test-E הרשמי
+eeg_project/eval/reporting.py     שמירת טבלאות, גרפים וסיכומים
+eeg_project/demos/live_demo.py    הכנה לדמו חי דרך LSL
+eeg_project/demos/cursor_demo.py  דמו offline של שליטה בסמן
+eeg_project/demos/replay_gui.py   דמו GUI של שליטה בסמן על הקלטות
+eeg_project/demos/launcher_gui.py משגר GUI לכל הדמואים
+eeg_project/demos/calibration.py  כיול אישי מזרם LSL
 ```
 
 פקודות חשובות:
 
 ```powershell
-.\.venv\Scripts\python.exe pipeline.py inspect BCICIV_2a_gdf/A01T.gdf
+.\.venv\Scripts\python.exe pipeline.py inspect data/BCICIV_2a_gdf/A01T.gdf
 .\.venv\Scripts\python.exe pipeline.py prepare
 .\.venv\Scripts\python.exe pipeline.py benchmark --models riemann fbcsp
 .\.venv\Scripts\python.exe pipeline.py demo --subject A03 --model riemann
@@ -370,7 +375,7 @@ mean kappa    = 0.647
 
 ```text
 README.md
-PROJECT_HISTORY.md
+docs/PROJECT_HISTORY.md
 pipeline.py
 eeg_project/
 results/benchmark_all_subjects_riemann_fbcsp_vote.csv

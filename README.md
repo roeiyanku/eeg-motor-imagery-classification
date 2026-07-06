@@ -13,7 +13,7 @@ Dataset 2a contains 9 subjects. Each subject has:
 
 - a labeled calibration recording: `A01T.gdf` ... `A09T.gdf`
 - an evaluation recording: `A01E.gdf` ... `A09E.gdf`
-- official evaluation labels stored locally in `true_labels/`
+- official evaluation labels stored locally in `data/true_labels/`
 - 22 EEG channels and 3 EOG channels
 
 Important event codes:
@@ -29,7 +29,7 @@ Important event codes:
 Raw `.gdf` files should be placed in:
 
 ```text
-BCICIV_2a_gdf/
+data/BCICIV_2a_gdf/
 ```
 
 The raw EEG files are ignored by Git because they are large dataset files.
@@ -54,7 +54,7 @@ In this workspace, the project was run with:
 Inspect a raw GDF file:
 
 ```powershell
-.\.venv\Scripts\python.exe pipeline.py inspect BCICIV_2a_gdf/A01T.gdf
+.\.venv\Scripts\python.exe pipeline.py inspect data/BCICIV_2a_gdf/A01T.gdf
 ```
 
 Prepare the labeled training epochs:
@@ -165,7 +165,7 @@ The main benchmark follows the BCI Competition IV 2a evaluation protocol:
 ```text
 train on A0XT.gdf
 test on A0XE.gdf
-score using true_labels/A0XE.mat
+score using data/true_labels/A0XE.mat
 average across 9 subjects
 ```
 
@@ -287,7 +287,7 @@ For a real-time system, `riemann` is the simplest strong decoder. `riemann_fbcsp
 A detailed professor-facing project history is in:
 
 ```text
-PROJECT_HISTORY.md
+docs/PROJECT_HISTORY.md
 ```
 
 It includes:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-DATA_DIR = Path("BCICIV_2a_gdf")
+DATA_DIR = Path("data") / "BCICIV_2a_gdf"
 PREPARED_DIR = Path("processed")
 RESULTS_DIR = Path("results")
 PREPARED_FILE = PREPARED_DIR / "dataset_2a_epochs.npz"

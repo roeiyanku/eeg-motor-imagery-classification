@@ -7,9 +7,9 @@ from pathlib import Path
 import mne
 import numpy as np
 
-from .config import DATA_DIR, EVENT_DESCRIPTIONS, PREPARED_FILE, RESULTS_DIR
-from .cnn import TORCH_MODEL_NAMES, train_cnn_subjects
-from .data import (
+from .io.config import DATA_DIR, EVENT_DESCRIPTIONS, PREPARED_FILE, RESULTS_DIR
+from .decoding.cnn import TORCH_MODEL_NAMES, train_cnn_subjects
+from .io.data import (
     EpochConfig,
     annotation_counts,
     load_prepared_dataset,
@@ -19,16 +19,16 @@ from .data import (
     training_files,
     validate_label_counts,
 )
-from .models import evaluate_classical_subjects
-from .benchmark import BENCHMARK_MODEL_NAMES, run_benchmark, run_pooled_benchmark
-from .calibration import (
+from .decoding.models import evaluate_classical_subjects
+from .eval.benchmark import BENCHMARK_MODEL_NAMES, run_benchmark, run_pooled_benchmark
+from .demos.calibration import (
     DEFAULT_CALIBRATION_CLASSES,
     record_lsl_calibration,
     record_lsl_calibration_gui,
     train_calibration_decoder,
 )
-from .decoders import DECODER_NAMES
-from .reporting import (
+from .decoding.decoders import DECODER_NAMES
+from .eval.reporting import (
     plot_class_distribution,
     plot_confusion_matrices,
     plot_model_comparison,
@@ -41,6 +41,28 @@ from .reporting import (
 
 CLASSICAL_MODEL_NAMES = ["logistic_regression", "svm", "random_forest"]
 ALL_MODEL_NAMES = CLASSICAL_MODEL_NAMES + list(TORCH_MODEL_NAMES)
+
+
+def _add_calibration_args(parser: argparse.ArgumentParser) -> None:
+    """Shared options for the LSL calibration-recording subcommands."""
+    parser.add_argument("--output", type=Path, default=Path("processed") / "personal_calibration.npz")
+    parser.add_argument("--stream-name", help="Optional exact LSL stream name. Defaults to first type=EEG stream.")
+    parser.add_argument("--channels", type=int, nargs="+", help="Zero-based LSL channel indices to record.")
+    parser.add_argument("--classes", nargs="+", default=list(DEFAULT_CALIBRATION_CLASSES))
+    parser.add_argument("--trials-per-class", type=int, default=20)
+    parser.add_argument("--rest-seconds", type=float, default=2.0)
+    parser.add_argument("--cue-seconds", type=float, default=1.0)
+    parser.add_argument("--imagery-seconds", type=float, default=4.0)
+    parser.add_argument("--stream-timeout", type=float, default=10.0)
+
+
+def _add_stream_window_args(parser: argparse.ArgumentParser) -> None:
+    """Shared sliding-window / smoothing options for the live and replay cursors."""
+    parser.add_argument("--window-seconds", type=float, default=2.0)
+    parser.add_argument("--step-seconds", type=float, default=0.12)
+    parser.add_argument("--speed", type=float, default=0.16)
+    parser.add_argument("--smoothing-windows", type=int, default=5)
+    parser.add_argument("--confidence-threshold", type=float, default=0.0)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -135,11 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=22,
         help="Exactly 22 zero-based LSL channel indices in Dataset 2a channel order. Defaults to first 22.",
     )
-    live_demo.add_argument("--window-seconds", type=float, default=2.0)
-    live_demo.add_argument("--step-seconds", type=float, default=0.12)
-    live_demo.add_argument("--speed", type=float, default=0.16)
-    live_demo.add_argument("--smoothing-windows", type=int, default=5)
-    live_demo.add_argument("--confidence-threshold", type=float, default=0.0)
+    _add_stream_window_args(live_demo)
     live_demo.add_argument("--duration", type=float, help="Optional run duration in seconds. Defaults to until Ctrl+C.")
     live_demo.add_argument("--stream-timeout", type=float, default=10.0)
 
@@ -151,11 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("--model", choices=list(DECODER_NAMES), default="riemann_fbcsp_vote")
     replay.add_argument("--data-dir", type=Path, default=DATA_DIR)
     replay.add_argument("--targets", type=int, default=12)
-    replay.add_argument("--window-seconds", type=float, default=2.0)
-    replay.add_argument("--step-seconds", type=float, default=0.12)
-    replay.add_argument("--speed", type=float, default=0.16)
-    replay.add_argument("--smoothing-windows", type=int, default=5)
-    replay.add_argument("--confidence-threshold", type=float, default=0.0)
+    _add_stream_window_args(replay)
     replay.add_argument("--timeout-windows", type=int, default=45)
     replay.add_argument("--seed", type=int, default=0)
 
@@ -163,29 +177,13 @@ def build_parser() -> argparse.ArgumentParser:
         "calibrate-record",
         help="Record a personal cued calibration dataset from an LSL EEG stream.",
     )
-    rec.add_argument("--output", type=Path, default=Path("processed") / "personal_calibration.npz")
-    rec.add_argument("--stream-name", help="Optional exact LSL stream name. Defaults to first type=EEG stream.")
-    rec.add_argument("--channels", type=int, nargs="+", help="Zero-based LSL channel indices to record.")
-    rec.add_argument("--classes", nargs="+", default=list(DEFAULT_CALIBRATION_CLASSES))
-    rec.add_argument("--trials-per-class", type=int, default=20)
-    rec.add_argument("--rest-seconds", type=float, default=2.0)
-    rec.add_argument("--cue-seconds", type=float, default=1.0)
-    rec.add_argument("--imagery-seconds", type=float, default=4.0)
-    rec.add_argument("--stream-timeout", type=float, default=10.0)
+    _add_calibration_args(rec)
 
     rec_gui = subparsers.add_parser(
         "calibrate-gui",
         help="Record a personal calibration dataset with a simple arrow/cue GUI.",
     )
-    rec_gui.add_argument("--output", type=Path, default=Path("processed") / "personal_calibration.npz")
-    rec_gui.add_argument("--stream-name", help="Optional exact LSL stream name. Defaults to first type=EEG stream.")
-    rec_gui.add_argument("--channels", type=int, nargs="+", help="Zero-based LSL channel indices to record.")
-    rec_gui.add_argument("--classes", nargs="+", default=list(DEFAULT_CALIBRATION_CLASSES))
-    rec_gui.add_argument("--trials-per-class", type=int, default=20)
-    rec_gui.add_argument("--rest-seconds", type=float, default=2.0)
-    rec_gui.add_argument("--cue-seconds", type=float, default=1.0)
-    rec_gui.add_argument("--imagery-seconds", type=float, default=4.0)
-    rec_gui.add_argument("--stream-timeout", type=float, default=10.0)
+    _add_calibration_args(rec_gui)
 
     cal_train = subparsers.add_parser(
         "calibrate-train",
@@ -337,7 +335,7 @@ def pooled_benchmark(args: argparse.Namespace) -> None:
 
 
 def demo(args: argparse.Namespace) -> None:
-    from .cursor_demo import render_gif, simulate_session
+    from .demos.cursor_demo import render_gif, simulate_session
 
     print(f"Training streaming decoder ({args.model}) on {args.subject} and running cursor task...")
     frames, stats = simulate_session(
@@ -358,13 +356,13 @@ def demo(args: argparse.Namespace) -> None:
 
 
 def gui(_: argparse.Namespace) -> None:
-    from .launcher_gui import run_launcher_gui
+    from .demos.launcher_gui import run_launcher_gui
 
     run_launcher_gui()
 
 
 def live_demo(args: argparse.Namespace) -> None:
-    from .live_demo import run_live_lsl
+    from .demos.live_demo import run_live_lsl
 
     try:
         run_live_lsl(
@@ -388,7 +386,7 @@ def live_demo(args: argparse.Namespace) -> None:
 
 
 def replay_live(args: argparse.Namespace) -> None:
-    from .replay_gui import run_replay_gui
+    from .demos.replay_gui import run_replay_gui
 
     run_replay_gui(
         subject=args.subject.upper(),
@@ -450,32 +448,22 @@ def calibrate_train(args: argparse.Namespace) -> None:
     )
 
 
+COMMANDS = {
+    "gui": gui,
+    "inspect": lambda args: inspect_file(args.gdf_path, args.plot),
+    "prepare": prepare,
+    "train": train,
+    "benchmark": benchmark,
+    "pooled-benchmark": pooled_benchmark,
+    "demo": demo,
+    "live-demo": live_demo,
+    "replay-live": replay_live,
+    "calibrate-record": calibrate_record,
+    "calibrate-gui": calibrate_gui,
+    "calibrate-train": calibrate_train,
+}
+
+
 def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-    if args.command == "inspect":
-        inspect_file(args.gdf_path, args.plot)
-    elif args.command == "gui":
-        gui(args)
-    elif args.command == "prepare":
-        prepare(args)
-    elif args.command == "train":
-        train(args)
-    elif args.command == "benchmark":
-        benchmark(args)
-    elif args.command == "pooled-benchmark":
-        pooled_benchmark(args)
-    elif args.command == "demo":
-        demo(args)
-    elif args.command == "live-demo":
-        live_demo(args)
-    elif args.command == "replay-live":
-        replay_live(args)
-    elif args.command == "calibrate-record":
-        calibrate_record(args)
-    elif args.command == "calibrate-gui":
-        calibrate_gui(args)
-    elif args.command == "calibrate-train":
-        calibrate_train(args)
-    else:
-        raise ValueError(f"Unknown command: {args.command}")
+    args = build_parser().parse_args()
+    COMMANDS[args.command](args)

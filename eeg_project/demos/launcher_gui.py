@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 from tkinter import BOTH, LEFT, RIGHT, StringVar, Tk, ttk
 
-from .decoders import DECODER_NAMES
+from ..decoding.decoders import DECODER_NAMES
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PIPELINE = PROJECT_ROOT / "pipeline.py"
 
 

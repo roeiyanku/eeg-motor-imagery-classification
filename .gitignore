@@ -4,12 +4,16 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+Microsoft/
+FILE_READMES/
 
 # Local/raw EEG data
-BCICIV_2a_gdf/*.gdf
+data/BCICIV_2a_gdf/*.gdf
 
 # Local documents that may contain personal details
 *.docx
+PROJECT_NOTES.md
+KaiKengAng_desc.pdf
 
 # Generated outputs
 outputs/

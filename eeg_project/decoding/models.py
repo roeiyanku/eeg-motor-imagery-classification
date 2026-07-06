@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 from mne.decoding import CSP
 from sklearn.ensemble import RandomForestClassifier
@@ -12,14 +10,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-
-@dataclass
-class ModelResult:
-    model: str
-    subject: str
-    accuracy: float
-    macro_f1: float
-    confusion: np.ndarray
+from ..results import EvalResult
 
 
 def classical_models(random_state: int) -> dict[str, Pipeline]:
@@ -59,9 +50,9 @@ def evaluate_classical_subjects(
     model_names: list[str],
     random_state: int = 42,
     test_size: float = 0.25,
-) -> list[ModelResult]:
+) -> list[EvalResult]:
     available = classical_models(random_state)
-    results: list[ModelResult] = []
+    results: list[EvalResult] = []
     for subject in sorted(set(subjects.astype(str))):
         mask = subjects.astype(str) == subject
         X_train, X_test, y_train, y_test = split_subject(X[mask], y[mask], random_state, test_size)
@@ -70,7 +61,7 @@ def evaluate_classical_subjects(
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             results.append(
-                ModelResult(
+                EvalResult(
                     model=model_name,
                     subject=subject,
                     accuracy=float(accuracy_score(y_test, y_pred)),

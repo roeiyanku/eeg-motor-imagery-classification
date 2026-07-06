@@ -26,10 +26,10 @@ from pathlib import Path
 
 import numpy as np
 
-from .benchmark import BROAD_H_FREQ, BROAD_L_FREQ, TRUE_LABELS_DIR, _load_true_labels
-from .config import CLASS_NAMES, DATA_DIR
-from .data import eeg_channel_names, load_raw
-from .decoders import build_decoder
+from ..eval.benchmark import BROAD_H_FREQ, BROAD_L_FREQ, TRUE_LABELS_DIR, _load_true_labels
+from ..io.config import CLASS_NAMES, DATA_DIR
+from ..io.data import eeg_channel_names, load_raw
+from ..decoding.decoders import build_decoder
 
 # Class index -> unit velocity direction (x right, y up).
 CLASS_DIRECTION = {

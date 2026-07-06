@@ -7,15 +7,14 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from .config import CLASS_NAMES
-from .models import ModelResult
-from .cnn import CnnResult
+from ..io.config import CLASS_NAMES
+from ..results import EvalResult
 
 # Winning kappa of the 2008 competition (FBCSP, Ang et al.), for reference lines.
 BENCHMARK_KAPPA_2008 = 0.57
 
 
-def write_metrics(results: list[ModelResult | CnnResult], output_dir: Path) -> pd.DataFrame:
+def write_metrics(results: list[EvalResult], output_dir: Path) -> pd.DataFrame:
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         {
@@ -57,7 +56,7 @@ def plot_model_comparison(metrics: pd.DataFrame, output_dir: Path) -> None:
     plt.close(fig)
 
 
-def plot_confusion_matrices(results: list[ModelResult | CnnResult], output_dir: Path) -> None:
+def plot_confusion_matrices(results: list[EvalResult], output_dir: Path) -> None:
     for model_name in sorted({result.model for result in results}):
         total = sum((result.confusion for result in results if result.model == model_name), np.zeros((4, 4), dtype=int))
         fig, ax = plt.subplots(figsize=(5, 4))
@@ -154,7 +153,7 @@ def write_benchmark(results, output_dir: Path) -> pd.DataFrame:
     return df
 
 
-def write_cnn_history(results: list[CnnResult], output_dir: Path) -> None:
+def write_cnn_history(results: list[EvalResult], output_dir: Path) -> None:
     rows = []
     for result in results:
         for row in result.history:

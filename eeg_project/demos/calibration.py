@@ -6,8 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import CLASS_NAMES
-from .decoders import build_decoder
+from ..io.config import CLASS_NAMES
+from ..decoding.decoders import build_decoder
 
 
 DEFAULT_CALIBRATION_CLASSES = ("left_hand", "right_hand", "feet", "tongue", "rest")

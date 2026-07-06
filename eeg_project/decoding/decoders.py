@@ -142,71 +142,64 @@ class FilterBankTangentSpace(BaseEstimator, TransformerMixin):
         return np.concatenate(feats, axis=1)
 
 
+def _riemann_lda(sfreq: float, bands, random_state: int) -> Pipeline:
+    return Pipeline(
+        [
+            ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas")),
+            ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
+        ]
+    )
+
+
+def _riemann_lr(sfreq: float, bands, random_state: int) -> Pipeline:
+    return Pipeline(
+        [
+            ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas")),
+            ("scale", StandardScaler()),
+            ("clf", LogisticRegression(max_iter=2000, C=1.0, random_state=random_state)),
+        ]
+    )
+
+
+# Registry of decoder factories: name -> callable(sfreq, random_state) -> estimator.
+# Keeping every decoder here means ``DECODER_NAMES`` (and the CLI choices derived
+# from it) stay in sync automatically.
+_DECODER_FACTORIES: dict[str, "callable"] = {
+    "csp_lda": lambda sfreq, rs: Pipeline(
+        [
+            ("band", BandPass(sfreq, 8.0, 30.0)),
+            ("csp", CSP(n_components=8, reg="ledoit_wolf", log=True, norm_trace=False)),
+            ("lda", LinearDiscriminantAnalysis()),
+        ]
+    ),
+    "fbcsp": lambda sfreq, rs: Pipeline(
+        [
+            ("fbcsp", FBCSP(sfreq, n_components=4)),
+            ("select", SelectKBest(mutual_info_classif, k=24)),
+            ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
+        ]
+    ),
+    "riemann": lambda sfreq, rs: _riemann_lda(sfreq, RIEMANN_BANDS, rs),
+    "riemann_wide": lambda sfreq, rs: _riemann_lda(sfreq, DEFAULT_BANDS, rs),
+    "riemann_lr": lambda sfreq, rs: _riemann_lr(sfreq, RIEMANN_BANDS, rs),
+    "riemann_wide_lr": lambda sfreq, rs: _riemann_lr(sfreq, DEFAULT_BANDS, rs),
+    "riemann_fbcsp_vote": lambda sfreq, rs: VotingClassifier(
+        estimators=[
+            ("riemann", build_decoder("riemann", sfreq, rs)),
+            ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
+        ],
+        voting="soft",
+    ),
+}
+
+
 def build_decoder(name: str, sfreq: float, random_state: int = 42) -> Pipeline:
     """Return a fresh, unfitted decoding pipeline for the given name."""
-    if name == "csp_lda":
-        return Pipeline(
-            [
-                ("band", BandPass(sfreq, 8.0, 30.0)),
-                ("csp", CSP(n_components=8, reg="ledoit_wolf", log=True, norm_trace=False)),
-                ("lda", LinearDiscriminantAnalysis()),
-            ]
-        )
-    if name == "fbcsp":
-        return Pipeline(
-            [
-                ("fbcsp", FBCSP(sfreq, n_components=4)),
-                ("select", SelectKBest(mutual_info_classif, k=24)),
-                ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
-            ]
-        )
-    if name == "riemann":
-        return Pipeline(
-            [
-                ("fbts", FilterBankTangentSpace(sfreq, RIEMANN_BANDS, estimator="oas")),
-                ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
-            ]
-        )
-    if name == "riemann_wide":
-        return Pipeline(
-            [
-                ("fbts", FilterBankTangentSpace(sfreq, DEFAULT_BANDS, estimator="oas")),
-                ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
-            ]
-        )
-    if name == "riemann_lr":
-        return Pipeline(
-            [
-                ("fbts", FilterBankTangentSpace(sfreq, RIEMANN_BANDS, estimator="oas")),
-                ("scale", StandardScaler()),
-                ("clf", LogisticRegression(max_iter=2000, C=1.0, random_state=random_state)),
-            ]
-        )
-    if name == "riemann_wide_lr":
-        return Pipeline(
-            [
-                ("fbts", FilterBankTangentSpace(sfreq, DEFAULT_BANDS, estimator="oas")),
-                ("scale", StandardScaler()),
-                ("clf", LogisticRegression(max_iter=2000, C=1.0, random_state=random_state)),
-            ]
-        )
-    if name == "riemann_fbcsp_vote":
-        return VotingClassifier(
-            estimators=[
-                ("riemann", build_decoder("riemann", sfreq, random_state)),
-                ("fbcsp", build_decoder("fbcsp", sfreq, random_state)),
-            ],
-            voting="soft",
-        )
-    raise ValueError(f"Unknown decoder: {name}")
+    try:
+        factory = _DECODER_FACTORIES[name]
+    except KeyError:
+        raise ValueError(f"Unknown decoder: {name}") from None
+    return factory(sfreq, random_state)
 
 
-DECODER_NAMES = (
-    "csp_lda",
-    "fbcsp",
-    "riemann",
-    "riemann_wide",
-    "riemann_lr",
-    "riemann_wide_lr",
-    "riemann_fbcsp_vote",
-)
+DECODER_NAMES = tuple(_DECODER_FACTORIES)

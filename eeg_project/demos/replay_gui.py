@@ -9,7 +9,7 @@ from tkinter import BOTH, CENTER, Canvas, Tk, ttk
 
 import numpy as np
 
-from .config import DATA_DIR
+from ..io.config import DATA_DIR
 from .cursor_demo import CLASS_DIRECTION, DIRECTION_LABEL, train_stream_decoder
 
 
