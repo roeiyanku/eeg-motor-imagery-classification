@@ -88,6 +88,46 @@ def _draw_scene(
     canvas.create_text(cx, height - 30, text=probs_text, fill="#d8dee9", font=("Segoe UI", 12))
 
 
+def _draw_final_scene(canvas: Canvas, stats: ReplayStats) -> None:
+    canvas.delete("all")
+    width = int(canvas.winfo_width() or 720)
+    height = int(canvas.winfo_height() or 520)
+    cx = width // 2
+    cy = height // 2
+    hit_rate = stats.hits / stats.targets if stats.targets else 0.0
+    window_acc = stats.correct_windows / stats.windows if stats.windows else 0.0
+
+    canvas.create_rectangle(0, 0, width, height, fill="#101820", outline="")
+    canvas.create_text(
+        cx,
+        cy - 82,
+        text="Finished",
+        fill="#f8f9fa",
+        font=("Segoe UI", 28, "bold"),
+    )
+    canvas.create_text(
+        cx,
+        cy - 20,
+        text=f"Targets hit: {stats.hits}/{stats.targets} ({hit_rate:.0%})",
+        fill="#f2cc8f",
+        font=("Segoe UI", 22, "bold"),
+    )
+    canvas.create_text(
+        cx,
+        cy + 28,
+        text=f"Window accuracy: {window_acc:.0%}",
+        fill="#d8dee9",
+        font=("Segoe UI", 20, "bold"),
+    )
+    canvas.create_text(
+        cx,
+        height - 38,
+        text="Close the window to return to the terminal.",
+        fill="#9fb3c8",
+        font=("Segoe UI", 12),
+    )
+
+
 def run_replay_gui(
     subject: str = "A03",
     model: str = "riemann_fbcsp_vote",
@@ -110,6 +150,7 @@ def run_replay_gui(
     )
     step = max(1, int(round(step_seconds * sfreq)))
     timeout_windows = max(1, timeout_windows)
+    n_targets = max(1, n_targets)
     order = _target_order(n_targets, seed)
     trial_idx = {direction: 0 for direction in range(4)}
 
@@ -185,15 +226,11 @@ def run_replay_gui(
 
         hit_rate = stats.hits / stats.targets if stats.targets else 0.0
         window_acc = stats.correct_windows / stats.windows if stats.windows else 0.0
-        _draw_scene(canvas, np.zeros(2), order[-1], None, zero_probs, stats, "finished")
-        canvas.create_text(
-            int(canvas.winfo_width() or 720) // 2,
-            int(canvas.winfo_height() or 520) // 2,
-            text=f"Finished\nHit rate: {hit_rate:.0%}\nWindow accuracy: {window_acc:.0%}",
-            fill="#f8f9fa",
-            font=("Segoe UI", 26, "bold"),
-            justify=CENTER,
+        print(
+            f"Replay finished: targets hit {stats.hits}/{stats.targets} "
+            f"({hit_rate:.0%}), window accuracy {window_acc:.0%}"
         )
+        _draw_final_scene(canvas, stats)
         root.mainloop()
     except KeyboardInterrupt:
         root.destroy()
