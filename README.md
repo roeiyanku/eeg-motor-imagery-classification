@@ -75,6 +75,12 @@ Run an offline cursor-control demo:
 .\.venv\Scripts\python.exe pipeline.py demo --subject A03 --model riemann --targets 12
 ```
 
+Open the launcher GUI for the main demo workflows:
+
+```powershell
+.\.venv\Scripts\python.exe pipeline.py gui
+```
+
 Run an interactive live-style replay GUI without EEG hardware:
 
 ```powershell
@@ -260,12 +266,15 @@ The project already includes live-demo infrastructure using Lab Streaming Layer 
 The repository now supports the first two practical live steps:
 
 ```text
+gui              -> launcher with buttons for replay, example GIF, calibration, and live EEG
 replay-live      -> interactive live-style GUI using held-out Dataset 2a EEG
 calibrate-record -> saves processed/personal_calibration.npz
 calibrate-gui    -> arrow/cue GUI for the same calibration dataset
 calibrate-train  -> saves models/personal_riemann.joblib
 live-demo --calibration-model models/personal_riemann.joblib
 ```
+
+`gui` is the easiest entry point for a presentation or grading meeting. It opens a small control panel with "Show Live Replay", "Save GIF Example", "Start Calibration GUI", and "Start Live EEG Demo" buttons.
 
 `replay-live` is useful before hardware is available: it trains on a subject's Dataset 2a calibration file, replays held-out evaluation trials as if they were a live EEG stream, decodes sliding windows, and moves a cursor in a GUI.
 

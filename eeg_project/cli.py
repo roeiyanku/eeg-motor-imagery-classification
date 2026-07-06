@@ -47,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="BCI Competition IV 2a EEG motor-imagery project pipeline.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    subparsers.add_parser("gui", help="Open a launcher GUI for demos, calibration, and live mode.")
+
     inspect = subparsers.add_parser("inspect", help="Inspect one GDF file.")
     inspect.add_argument("gdf_path", nargs="?", type=Path, default=DATA_DIR / "A01T.gdf")
     inspect.add_argument("--plot", action="store_true", help="Open the MNE raw plot window.")
@@ -355,6 +357,12 @@ def demo(args: argparse.Namespace) -> None:
     print(f"Saved cursor demo animation to: {out}")
 
 
+def gui(_: argparse.Namespace) -> None:
+    from .launcher_gui import run_launcher_gui
+
+    run_launcher_gui()
+
+
 def live_demo(args: argparse.Namespace) -> None:
     from .live_demo import run_live_lsl
 
@@ -447,6 +455,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "inspect":
         inspect_file(args.gdf_path, args.plot)
+    elif args.command == "gui":
+        gui(args)
     elif args.command == "prepare":
         prepare(args)
     elif args.command == "train":

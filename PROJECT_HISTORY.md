@@ -311,6 +311,7 @@ Accuracy לבדו לא מספיק, כי בבעיה עם 4 מחלקות יש הצ
 הפרויקט כולל גם כיוון מעשי למערכת live:
 
 - `cursor_demo.py`: דמו offline שבו פלט המודל מזיז סמן
+- `gui`: חלון launcher שמאפשר להפעיל replay, דמו לדוגמה, כיול ו-live demo מכפתורים
 - `replay-live`: סימולציית GUI אינטראקטיבית שמריצה קובצי evaluation כאילו היו זרם EEG חי
 - `live_demo.py`: חיבור לזרם EEG חי דרך LSL
 - `calibrate-gui`: ממשק כיול עם cues דמויי חיצים, בדומה לפרוטוקול motor imagery
@@ -336,6 +337,7 @@ tongue     -> move cursor up
 לאחר עדכון נוסף הוספנו גם workflow מעשי לכיול אישי:
 
 ```text
+gui              -> חלון הפעלה מרכזי לדמו, replay, כיול ו-live EEG
 replay-live      -> סימולציה חיה בלי חומרת EEG, על בסיס Dataset 2a
 calibrate-gui    -> הצגת cues ויזואליים והקלטת EEG מסומן
 calibrate-train  -> אימון decoder אישי ושמירת joblib
