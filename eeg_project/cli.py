@@ -20,7 +20,7 @@ from .data import (
     validate_label_counts,
 )
 from .models import evaluate_classical_subjects
-from .benchmark import BENCHMARK_MODEL_NAMES, run_benchmark
+from .benchmark import BENCHMARK_MODEL_NAMES, run_benchmark, run_pooled_benchmark
 from .calibration import (
     DEFAULT_CALIBRATION_CLASSES,
     record_lsl_calibration,
@@ -88,6 +88,24 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--resample", type=float, default=125.0)
     bench.add_argument("--random-state", type=int, default=42)
     bench.add_argument("--cnn-epochs", type=int, default=120)
+
+    pooled = subparsers.add_parser(
+        "pooled-benchmark",
+        help="Train one model on all subjects' T files pooled together, then test each E file.",
+    )
+    pooled.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    pooled.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
+    pooled.add_argument(
+        "--models",
+        nargs="+",
+        choices=list(BENCHMARK_MODEL_NAMES),
+        default=["riemann_fbcsp_vote"],
+    )
+    pooled.add_argument("--subjects", nargs="*", help="Optional subject IDs, e.g. A01 A02.")
+    pooled.add_argument("--tmin", type=float, default=0.5)
+    pooled.add_argument("--tmax", type=float, default=4.0)
+    pooled.add_argument("--resample", type=float, default=125.0)
+    pooled.add_argument("--random-state", type=int, default=42)
 
     demo = subparsers.add_parser(
         "demo",
@@ -281,6 +299,25 @@ def benchmark(args: argparse.Namespace) -> None:
     print("\n2008 winning kappa (FBCSP): 0.57")
 
 
+def pooled_benchmark(args: argparse.Namespace) -> None:
+    subjects = tuple(s.upper() for s in args.subjects) if args.subjects else None
+    kwargs = {"subjects": subjects} if subjects else {}
+    results = run_pooled_benchmark(
+        args.models,
+        data_dir=args.data_dir,
+        tmin=args.tmin,
+        tmax=args.tmax,
+        resample=args.resample,
+        random_state=args.random_state,
+        **kwargs,
+    )
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    df = write_benchmark(results, args.output_dir)
+    print(f"\nSaved pooled benchmark results to: {args.output_dir}")
+    summary = df.groupby("model")[["accuracy", "kappa"]].mean().round(3).sort_values("kappa", ascending=False)
+    print(summary)
+
+
 def demo(args: argparse.Namespace) -> None:
     from .cursor_demo import render_gif, simulate_session
 
@@ -382,6 +419,8 @@ def main() -> None:
         train(args)
     elif args.command == "benchmark":
         benchmark(args)
+    elif args.command == "pooled-benchmark":
+        pooled_benchmark(args)
     elif args.command == "demo":
         demo(args)
     elif args.command == "live-demo":

@@ -1,0 +1,10 @@
+model,subject,accuracy,kappa
+pooled_riemann_fbcsp_vote,A01,0.688,0.583
+pooled_riemann_fbcsp_vote,A02,0.323,0.097
+pooled_riemann_fbcsp_vote,A03,0.701,0.602
+pooled_riemann_fbcsp_vote,A04,0.483,0.310
+pooled_riemann_fbcsp_vote,A05,0.344,0.125
+pooled_riemann_fbcsp_vote,A06,0.413,0.218
+pooled_riemann_fbcsp_vote,A07,0.476,0.301
+pooled_riemann_fbcsp_vote,A08,0.628,0.505
+pooled_riemann_fbcsp_vote,A09,0.625,0.500

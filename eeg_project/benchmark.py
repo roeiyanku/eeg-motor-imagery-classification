@@ -109,6 +109,27 @@ def load_subject_train_eval(
     return X_train, y_train, X_eval, y_eval, sfreq
 
 
+def load_subject_eval(
+    subject: str,
+    data_dir: Path = DATA_DIR,
+    tmin: float = 0.5,
+    tmax: float = 4.0,
+    resample: float | None = 125.0,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Return ``(X_eval, y_eval, sfreq)`` for one subject's evaluation file."""
+    eval_ids = {"783": 0}
+    X_eval, _, sfreq = _epochs_from_file(
+        data_dir / f"{subject}E.gdf", eval_ids, tmin, tmax, resample
+    )
+    y_eval = _load_true_labels(TRUE_LABELS_DIR / f"{subject}E.mat")
+    if len(y_eval) != len(X_eval):
+        raise ValueError(
+            f"{subject}: {len(X_eval)} eval epochs but {len(y_eval)} labels; "
+            "check that the E.gdf and true-label file correspond."
+        )
+    return X_eval, y_eval, sfreq
+
+
 def _build_classical_benchmark_model(name: str, sfreq: float, random_state: int) -> Pipeline:
     """Return a classical model with benchmark-time 8-30 Hz filtering."""
     model = classical_models(random_state)[name]
@@ -257,4 +278,72 @@ def run_benchmark(
                 )
             )
             print(f"    {name:10s} acc={acc:.3f} kappa={kappa:.3f}", flush=True)
+    return results
+
+
+def run_pooled_benchmark(
+    model_names: list[str],
+    data_dir: Path = DATA_DIR,
+    subjects: tuple[str, ...] = SUBJECTS,
+    tmin: float = 0.5,
+    tmax: float = 4.0,
+    resample: float | None = 125.0,
+    random_state: int = 42,
+) -> list[BenchmarkResult]:
+    """Train one pooled model on all subjects' ``T`` files, then score each ``E`` file."""
+    unsupported = [name for name in model_names if name not in DECODER_NAMES and name not in CLASSICAL_BENCHMARK_NAMES]
+    if unsupported:
+        raise ValueError(
+            "Pooled benchmark currently supports classical/decoder models only, not neural models: "
+            f"{unsupported}"
+        )
+
+    mne.set_log_level("WARNING")
+    train_ids = {"769": 0, "770": 1, "771": 2, "772": 3}
+    X_parts: list[np.ndarray] = []
+    y_parts: list[np.ndarray] = []
+    sfreq: float | None = None
+    for subject in subjects:
+        X_train, codes, subject_sfreq = _epochs_from_file(
+            data_dir / f"{subject}T.gdf", train_ids, tmin, tmax, resample
+        )
+        X_parts.append(X_train)
+        y_parts.append(codes.astype(int))
+        sfreq = subject_sfreq
+        print(f"{subject}: pooled train part={X_train.shape}", flush=True)
+
+    X_pool = np.concatenate(X_parts)
+    y_pool = np.concatenate(y_parts)
+    if sfreq is None:
+        raise ValueError("No subjects were provided for pooled benchmark.")
+    print(f"Pooled train={X_pool.shape} sfreq={sfreq:.0f}Hz", flush=True)
+
+    results: list[BenchmarkResult] = []
+    for name in model_names:
+        if name in DECODER_NAMES:
+            model = build_decoder(name, sfreq=sfreq, random_state=random_state)
+        elif name in CLASSICAL_BENCHMARK_NAMES:
+            model = _build_classical_benchmark_model(name, sfreq, random_state)
+        else:
+            raise ValueError(f"Unknown pooled benchmark model: {name}")
+
+        print(f"Training pooled {name}...", flush=True)
+        model.fit(X_pool, y_pool)
+        for subject in subjects:
+            X_eval, y_eval, _ = load_subject_eval(
+                subject, data_dir=data_dir, tmin=tmin, tmax=tmax, resample=resample
+            )
+            y_pred = model.predict(X_eval)
+            acc = float(accuracy_score(y_eval, y_pred))
+            kappa = float(cohen_kappa_score(y_eval, y_pred))
+            results.append(
+                BenchmarkResult(
+                    model=f"pooled_{name}",
+                    subject=subject,
+                    accuracy=acc,
+                    kappa=kappa,
+                    confusion=confusion_matrix(y_eval, y_pred, labels=[0, 1, 2, 3]),
+                )
+            )
+            print(f"    {subject} {name:18s} acc={acc:.3f} kappa={kappa:.3f}", flush=True)
     return results

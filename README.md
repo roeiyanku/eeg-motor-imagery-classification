@@ -185,12 +185,22 @@ riemann_fbcsp_vote    0.735           0.647
 
 This is the strongest result so far and is clearly above the 2008 FBCSP reference kappa of about 0.57.
 
+We also tested naive cross-subject pooling: one `riemann_fbcsp_vote` model trained on all 9 subjects' `T` files and tested on each subject's `E` file. This performed much worse:
+
+```text
+model                         mean accuracy   mean kappa
+pooled_riemann_fbcsp_vote      0.520           0.360
+```
+
+This supports the main live-BCI conclusion: EEG motor-imagery models need subject-specific calibration. More data from other people does not automatically help unless we use domain adaptation or personal fine-tuning.
+
 Saved result tables:
 
 ```text
 results/benchmark_all_subjects_riemann_fbcsp_vote.csv
 results/benchmark_all_subjects_riemann_fbcsp_shallow_convnet.csv
 results/benchmark_all_subjects_riemann_wide_lr.csv
+results/benchmark_pooled_riemann_fbcsp_vote.csv
 ```
 
 ## What Worked
