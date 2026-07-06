@@ -20,7 +20,7 @@ from mne.decoding import CSP
 from scipy.signal import butter, sosfiltfilt
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.ensemble import VotingClassifier
+from sklearn.ensemble import StackingClassifier, VotingClassifier
 from sklearn.feature_selection import SelectKBest, mutual_info_classif
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -116,10 +116,32 @@ class FilterBankTangentSpace(BaseEstimator, TransformerMixin):
     decoder and is the usual way to lift Riemannian decoding on 2a.
     """
 
-    def __init__(self, sfreq: float, bands=RIEMANN_BANDS, estimator: str = "oas"):
+    def __init__(self, sfreq: float, bands=RIEMANN_BANDS, estimator: str = "oas", align: str | None = None):
         self.sfreq = sfreq
         self.bands = bands
         self.estimator = estimator
+        self.align = align  # None | "euclid" (Euclidean Alignment) | "riemann" (Riemannian Alignment)
+
+    def _recenter(self, covs: np.ndarray) -> np.ndarray:
+        """Whiten a batch of covariances by their mean, recentering it to identity.
+
+        This is transductive session alignment (He & Wu 2020): the reference mean
+        is computed from *this* batch, so the ``T`` and ``E`` sessions are each
+        recentered independently, cancelling the session-specific covariance shift
+        that otherwise hurts train-on-T / test-on-E transfer.
+
+        NOTE: because the reference is estimated from the batch, aligned decoders
+        (``align`` set) require a representative batch at predict time -- the
+        benchmark scores the whole ``E`` set at once. They are NOT valid for
+        single-window streaming prediction (demo/live-demo/replay-live), where a
+        one-trial batch would collapse every covariance to the identity. Use the
+        reference-free ``riemann`` there instead.
+        """
+        from pyriemann.utils.base import invsqrtm
+        from pyriemann.utils.mean import mean_covariance
+
+        ref_inv_sqrt = invsqrtm(mean_covariance(covs, metric=self.align))
+        return ref_inv_sqrt @ covs @ ref_inv_sqrt
 
     def fit(self, X, y=None):  # noqa: D102
         from pyriemann.estimation import Covariances
@@ -130,6 +152,8 @@ class FilterBankTangentSpace(BaseEstimator, TransformerMixin):
             Xb = _bandpass(X, self.sfreq, low, high)
             cov = Covariances(estimator=self.estimator)
             covs = cov.fit_transform(Xb)
+            if self.align:
+                covs = self._recenter(covs)
             ts = TangentSpace().fit(covs)
             self.pipes_.append((cov, ts))
         return self
@@ -138,23 +162,26 @@ class FilterBankTangentSpace(BaseEstimator, TransformerMixin):
         feats = []
         for (low, high), (cov, ts) in zip(self.bands, self.pipes_):
             Xb = _bandpass(X, self.sfreq, low, high)
-            feats.append(ts.transform(cov.transform(Xb)))
+            covs = cov.transform(Xb)
+            if self.align:
+                covs = self._recenter(covs)
+            feats.append(ts.transform(covs))
         return np.concatenate(feats, axis=1)
 
 
-def _riemann_lda(sfreq: float, bands, random_state: int) -> Pipeline:
+def _riemann_lda(sfreq: float, bands, random_state: int, align: str | None = None) -> Pipeline:
     return Pipeline(
         [
-            ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas")),
+            ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas", align=align)),
             ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
         ]
     )
 
 
-def _riemann_lr(sfreq: float, bands, random_state: int) -> Pipeline:
+def _riemann_lr(sfreq: float, bands, random_state: int, align: str | None = None) -> Pipeline:
     return Pipeline(
         [
-            ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas")),
+            ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas", align=align)),
             ("scale", StandardScaler()),
             ("clf", LogisticRegression(max_iter=2000, C=1.0, random_state=random_state)),
         ]
@@ -183,12 +210,46 @@ _DECODER_FACTORIES: dict[str, "callable"] = {
     "riemann_wide": lambda sfreq, rs: _riemann_lda(sfreq, DEFAULT_BANDS, rs),
     "riemann_lr": lambda sfreq, rs: _riemann_lr(sfreq, RIEMANN_BANDS, rs),
     "riemann_wide_lr": lambda sfreq, rs: _riemann_lr(sfreq, DEFAULT_BANDS, rs),
+    # Session-aligned Riemann: recenter each session's covariances before the
+    # tangent-space projection to cancel T->E drift (He & Wu 2020).
+    "riemann_ea": lambda sfreq, rs: _riemann_lda(sfreq, RIEMANN_BANDS, rs, align="euclid"),
+    "riemann_ra": lambda sfreq, rs: _riemann_lda(sfreq, RIEMANN_BANDS, rs, align="riemann"),
     "riemann_fbcsp_vote": lambda sfreq, rs: VotingClassifier(
         estimators=[
             ("riemann", build_decoder("riemann", sfreq, rs)),
             ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
         ],
         voting="soft",
+    ),
+    # Aligned version of the best ensemble: EA-Riemann soft-voted with FBCSP.
+    "riemann_ea_fbcsp_vote": lambda sfreq, rs: VotingClassifier(
+        estimators=[
+            ("riemann_ea", build_decoder("riemann_ea", sfreq, rs)),
+            ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
+        ],
+        voting="soft",
+    ),
+    # Stacking: a logistic meta-learner over the base decoders' class
+    # probabilities, learned via internal CV. Can exploit that the bases make
+    # different errors more flexibly than a fixed soft vote.
+    "riemann_ea_fbcsp_stack": lambda sfreq, rs: StackingClassifier(
+        estimators=[
+            ("riemann_ea", build_decoder("riemann_ea", sfreq, rs)),
+            ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
+        ],
+        final_estimator=LogisticRegression(max_iter=1000, random_state=rs),
+        stack_method="predict_proba",
+        cv=3,
+    ),
+    "riemann_ea_fbcsp_csp_stack": lambda sfreq, rs: StackingClassifier(
+        estimators=[
+            ("riemann_ea", build_decoder("riemann_ea", sfreq, rs)),
+            ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
+            ("csp_lda", build_decoder("csp_lda", sfreq, rs)),
+        ],
+        final_estimator=LogisticRegression(max_iter=1000, random_state=rs),
+        stack_method="predict_proba",
+        cv=3,
     ),
 }
 

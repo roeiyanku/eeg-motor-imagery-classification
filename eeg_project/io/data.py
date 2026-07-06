@@ -44,8 +44,6 @@ def annotation_counts(raw: mne.io.BaseRaw) -> dict[str, int]:
 
 def load_raw(path: Path, preload: bool = False) -> mne.io.BaseRaw:
     raw = mne.io.read_raw_gdf(path, preload=preload, verbose="ERROR")
-    for channel_type in ("eog", "eeg"):
-        pass
     eog_names = [name for name in raw.ch_names if name.upper().startswith("EOG")]
     if eog_names:
         raw.set_channel_types({name: "eog" for name in eog_names}, verbose="ERROR")

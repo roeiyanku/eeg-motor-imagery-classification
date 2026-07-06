@@ -9,22 +9,14 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
-from ..io.config import CLASS_NAMES, DATA_DIR
+from ..io.config import DATA_DIR
 from .calibration import class_names_for_dataset2a, load_calibration_model, movement_vector
-from .cursor_demo import CLASS_DIRECTION, DIRECTION_LABEL, _load_raw_epoched
+from .cursor_demo import CLASS_DIRECTION, _load_raw_epoched
 from ..decoding.decoders import build_decoder
-
-
-@dataclass
-class LiveState:
-    cursor: np.ndarray
-    decoded: int
-    probs: np.ndarray
 
 
 class RollingEegBuffer:

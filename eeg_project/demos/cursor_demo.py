@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 
 from ..eval.benchmark import BROAD_H_FREQ, BROAD_L_FREQ, TRUE_LABELS_DIR, _load_true_labels
-from ..io.config import CLASS_NAMES, DATA_DIR
+from ..io.config import DATA_DIR
 from ..io.data import eeg_channel_names, load_raw
 from ..decoding.decoders import build_decoder
 
