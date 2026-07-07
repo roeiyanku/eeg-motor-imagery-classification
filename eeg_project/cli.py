@@ -71,6 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("gui", help="Open a launcher GUI for demos, calibration, and live mode.")
 
+    mock = subparsers.add_parser(
+        "mock-stream",
+        help="Publish a synthetic EEG stream over LSL to test the live pipeline without hardware.",
+    )
+    mock.add_argument("--name", default="MockEEG", help="LSL stream name.")
+    mock.add_argument("--channels", type=int, default=22, help="Channel count (22 matches the Dataset 2a decoder).")
+    mock.add_argument("--sfreq", type=float, default=250.0)
+    mock.add_argument("--duration", type=float, help="Optional seconds to run. Defaults to until Ctrl+C.")
+    mock.add_argument("--seed", type=int, default=0)
+
     inspect = subparsers.add_parser("inspect", help="Inspect one GDF file.")
     inspect.add_argument("gdf_path", nargs="?", type=Path, default=DATA_DIR / "A01T.gdf")
     inspect.add_argument("--plot", action="store_true", help="Open the MNE raw plot window.")
@@ -367,6 +377,22 @@ def gui(_: argparse.Namespace) -> None:
     run_launcher_gui()
 
 
+def mock_stream(args: argparse.Namespace) -> None:
+    from .demos.mock_lsl import run_mock_stream
+
+    try:
+        run_mock_stream(
+            name=args.name,
+            n_channels=args.channels,
+            sfreq=args.sfreq,
+            duration=args.duration,
+            seed=args.seed,
+        )
+    except RuntimeError as exc:
+        print(f"Mock stream error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
 def live_demo(args: argparse.Namespace) -> None:
     from .demos.live_demo import run_live_lsl
 
@@ -457,6 +483,7 @@ def calibrate_train(args: argparse.Namespace) -> None:
 
 COMMANDS = {
     "gui": gui,
+    "mock-stream": mock_stream,
     "inspect": lambda args: inspect_file(args.gdf_path, args.plot),
     "prepare": prepare,
     "train": train,
