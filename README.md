@@ -29,8 +29,10 @@ A **Riemannian-geometry** decoder with **session alignment**, ensembled with FBC
 | `riemann_fbcsp_vote` (ensemble) | 0.735 | 0.647 |
 | `riemann_ea` (aligned, single model) | 0.735 | 0.647 |
 | `riemann` (filter-bank tangent space) | 0.712 | 0.616 |
+| `fgmdm` (filter-bank geodesic MDM) | 0.703 | 0.604 |
 | `fbcsp` (reproduces the 2008 method) | 0.675 | 0.566 |
 | `shallow_convnet` (best deep net) | 0.627 | 0.503 |
+| `mdm` (filter-bank MDM) | 0.595 | 0.460 |
 | — *2008 winner (Ang et al., FBCSP)* | — | *0.57* |
 
 ---
@@ -85,7 +87,7 @@ Train and test are separate recordings, so the signal *drifts*. **Euclidean Alig
 **3. Calibration must be per-person.**
 One model pooled across all subjects scored **0.360**; per-subject it scored **0.647**. Brains differ — this is the core lesson for any real BCI.
 
-**Honest negatives** (documented, not hidden): a stacking meta-learner was a wash, Riemannian vs Euclidean alignment tied exactly, and crop/window augmentation *hurt* (0.562) — because it helps neural nets but a covariance needs the whole trial.
+**Honest negatives** (documented, not hidden): MDM was weaker than tangent-space Riemannian decoding, FgMDM was strong but not a new best, a stacking meta-learner was a wash, Riemannian vs Euclidean alignment tied exactly, and crop/window augmentation *hurt* (0.562) — because it helps neural nets but a covariance needs the whole trial.
 
 ---
 

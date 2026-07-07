@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 from mne.decoding import CSP
 from scipy.signal import butter, sosfiltfilt
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.ensemble import VotingClassifier
 from sklearn.feature_selection import SelectKBest, mutual_info_classif
@@ -169,6 +169,65 @@ class FilterBankTangentSpace(BaseEstimator, TransformerMixin):
         return np.concatenate(feats, axis=1)
 
 
+class FilterBankRiemannClassifier(BaseEstimator, ClassifierMixin):
+    """Filter-bank wrapper around pyRiemann covariance classifiers.
+
+    MDM and FgMDM are EEG-specific Riemannian baselines. They classify each
+    trial by distances between covariance matrices rather than by tangent-space
+    features. We fit one classifier per motor band and average class
+    probabilities across bands, matching the filter-bank idea used by FBCSP and
+    the tangent-space decoder.
+    """
+
+    def __init__(
+        self,
+        sfreq: float,
+        classifier: str = "mdm",
+        bands=RIEMANN_BANDS,
+        estimator: str = "oas",
+        metric: str = "riemann",
+    ):
+        self.sfreq = sfreq
+        self.classifier = classifier
+        self.bands = bands
+        self.estimator = estimator
+        self.metric = metric
+
+    def _make_classifier(self):
+        from pyriemann.classification import FgMDM, MDM
+
+        if self.classifier == "mdm":
+            return MDM(metric=self.metric)
+        if self.classifier == "fgmdm":
+            return FgMDM(metric=self.metric)
+        raise ValueError(f"Unknown Riemannian classifier: {self.classifier}")
+
+    def fit(self, X, y):  # noqa: D102
+        from pyriemann.estimation import Covariances
+
+        self.classes_ = np.unique(y)
+        self.pipes_ = []
+        for low, high in self.bands:
+            Xb = _bandpass(X, self.sfreq, low, high)
+            cov = Covariances(estimator=self.estimator)
+            covs = cov.fit_transform(Xb)
+            clf = self._make_classifier()
+            clf.fit(covs, y)
+            self.pipes_.append((cov, clf))
+        return self
+
+    def predict_proba(self, X):  # noqa: D102
+        probs = []
+        for (low, high), (cov, clf) in zip(self.bands, self.pipes_):
+            Xb = _bandpass(X, self.sfreq, low, high)
+            covs = cov.transform(Xb)
+            probs.append(clf.predict_proba(covs))
+        return np.mean(np.stack(probs), axis=0)
+
+    def predict(self, X):  # noqa: D102
+        return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
+
+
 def _riemann_lda(sfreq: float, bands, random_state: int, align: str | None = None) -> Pipeline:
     return Pipeline(
         [
@@ -210,6 +269,8 @@ _DECODER_FACTORIES: dict[str, "callable"] = {
     "riemann_wide": lambda sfreq, rs: _riemann_lda(sfreq, DEFAULT_BANDS, rs),
     "riemann_lr": lambda sfreq, rs: _riemann_lr(sfreq, RIEMANN_BANDS, rs),
     "riemann_wide_lr": lambda sfreq, rs: _riemann_lr(sfreq, DEFAULT_BANDS, rs),
+    "mdm": lambda sfreq, rs: FilterBankRiemannClassifier(sfreq, classifier="mdm"),
+    "fgmdm": lambda sfreq, rs: FilterBankRiemannClassifier(sfreq, classifier="fgmdm"),
     # Session-aligned Riemann: recenter each session's covariances before the
     # tangent-space projection to cancel T->E drift (He & Wu 2020).
     "riemann_ea": lambda sfreq, rs: _riemann_lda(sfreq, RIEMANN_BANDS, rs, align="euclid"),
