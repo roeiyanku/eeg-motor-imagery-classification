@@ -20,7 +20,7 @@ from mne.decoding import CSP
 from scipy.signal import butter, sosfiltfilt
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.ensemble import StackingClassifier, VotingClassifier
+from sklearn.ensemble import VotingClassifier
 from sklearn.feature_selection import SelectKBest, mutual_info_classif
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -229,27 +229,13 @@ _DECODER_FACTORIES: dict[str, "callable"] = {
         ],
         voting="soft",
     ),
-    # Stacking: a logistic meta-learner over the base decoders' class
-    # probabilities, learned via internal CV. Can exploit that the bases make
-    # different errors more flexibly than a fixed soft vote.
-    "riemann_ea_fbcsp_stack": lambda sfreq, rs: StackingClassifier(
+    # Same ensemble but with Riemannian (geometric-mean) alignment instead of EA.
+    "riemann_ra_fbcsp_vote": lambda sfreq, rs: VotingClassifier(
         estimators=[
-            ("riemann_ea", build_decoder("riemann_ea", sfreq, rs)),
+            ("riemann_ra", build_decoder("riemann_ra", sfreq, rs)),
             ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
         ],
-        final_estimator=LogisticRegression(max_iter=1000, random_state=rs),
-        stack_method="predict_proba",
-        cv=3,
-    ),
-    "riemann_ea_fbcsp_csp_stack": lambda sfreq, rs: StackingClassifier(
-        estimators=[
-            ("riemann_ea", build_decoder("riemann_ea", sfreq, rs)),
-            ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
-            ("csp_lda", build_decoder("csp_lda", sfreq, rs)),
-        ],
-        final_estimator=LogisticRegression(max_iter=1000, random_state=rs),
-        stack_method="predict_proba",
-        cv=3,
+        voting="soft",
     ),
 }
 

@@ -160,6 +160,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_stream_window_args(live_demo)
     live_demo.add_argument("--duration", type=float, help="Optional run duration in seconds. Defaults to until Ctrl+C.")
     live_demo.add_argument("--stream-timeout", type=float, default=10.0)
+    live_demo.add_argument(
+        "--align-windows",
+        type=int,
+        default=20,
+        help="Online alignment: decode over the last N windows so an aligned decoder (riemann_ea/ra) tracks live drift. 1 disables.",
+    )
 
     replay = subparsers.add_parser(
         "replay-live",
@@ -379,6 +385,7 @@ def live_demo(args: argparse.Namespace) -> None:
             confidence_threshold=args.confidence_threshold,
             duration=args.duration,
             stream_timeout=args.stream_timeout,
+            align_windows=args.align_windows,
         )
     except RuntimeError as exc:
         print(f"Live demo error: {exc}", file=sys.stderr)

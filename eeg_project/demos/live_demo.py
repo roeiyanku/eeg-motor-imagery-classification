@@ -103,8 +103,18 @@ def run_live_lsl(
     confidence_threshold: float = 0.0,
     duration: float | None = None,
     stream_timeout: float = 10.0,
+    align_windows: int = 20,
 ) -> None:
-    """Connect to LSL and print continuous cursor-state updates."""
+    """Connect to LSL and print continuous cursor-state updates.
+
+    ``align_windows`` enables online session alignment: each decode runs on a
+    batch of the last ``align_windows`` windows rather than a single window. For
+    an aligned decoder (``riemann_ea``/``riemann_ra``) that batch is exactly the
+    running reference the transductive EA needs, so alignment tracks live drift
+    without labels. For a plain decoder the last-row prediction is identical to
+    single-window decoding, so this is safe for every model (set to 1 to
+    disable).
+    """
     StreamInlet, _, _ = _require_pylsl()
     info = resolve_eeg_stream(stream_name, stream_timeout)
     stream_sfreq = float(info.nominal_srate())
@@ -143,9 +153,12 @@ def run_live_lsl(
     buffer = RollingEegBuffer(n_channels=len(channel_indices), n_samples=win)
     cursor = np.zeros(2, dtype=np.float64)
     probs_history: deque[np.ndarray] = deque(maxlen=max(1, smoothing_windows))
+    recent_windows: deque[np.ndarray] = deque(maxlen=max(1, align_windows))
     next_decode = time.monotonic()
     start_time = time.monotonic()
 
+    if align_windows > 1:
+        print(f"Online alignment on: reference over the last {align_windows} windows.")
     print("Streaming. Press Ctrl+C to stop.")
     try:
         while duration is None or time.monotonic() - start_time < duration:
@@ -155,8 +168,11 @@ def run_live_lsl(
             if not buffer.ready() or time.monotonic() < next_decode:
                 continue
 
-            window = buffer.window()[None, :, :]
-            probs = decoder.predict_proba(window)[0]
+            # Decode a rolling batch of recent windows and take the newest row.
+            # For aligned decoders this batch is the running EA/RA reference.
+            recent_windows.append(buffer.window())
+            batch = np.stack(recent_windows)
+            probs = decoder.predict_proba(batch)[-1]
             probs_history.append(probs)
             smooth_probs = np.mean(np.stack(probs_history), axis=0)
             confidence = float(np.max(smooth_probs))
