@@ -19,6 +19,7 @@ import numpy as np
 from mne.decoding import CSP
 from scipy.signal import butter, sosfiltfilt
 from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
+from sklearn.cluster import KMeans
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.ensemble import VotingClassifier
 from sklearn.feature_selection import SelectKBest, mutual_info_classif
@@ -257,6 +258,46 @@ class FilterBankRiemannClassifier(BaseEstimator, ClassifierMixin):
         return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
 
 
+class KMeansVoteClassifier(BaseEstimator, ClassifierMixin):
+    """Classic unsupervised K-Means, evaluated as a classifier via cluster-label voting.
+
+    Unlike ``NearestCentroid`` (which builds one centroid per *known* class
+    directly from labels), this runs actual K-Means clustering on the feature
+    space with no notion of the four motor-imagery classes -- it just finds
+    ``n_clusters`` groups by minimizing within-cluster variance. Labels are
+    only used afterwards, to assign each discovered cluster the majority true
+    class of the training trials that landed in it (the standard
+    "cluster-then-label" way to score unsupervised clustering against ground
+    truth). At predict time a trial is assigned to its nearest cluster
+    center, then labeled with that cluster's majority class.
+    """
+
+    def __init__(self, n_clusters: int = 4, random_state: int = 42, n_init: int = 10):
+        self.n_clusters = n_clusters
+        self.random_state = random_state
+        self.n_init = n_init
+
+    def fit(self, X, y):  # noqa: D102
+        y = np.asarray(y)
+        self.classes_ = np.unique(y)
+        self.kmeans_ = KMeans(n_clusters=self.n_clusters, random_state=self.random_state, n_init=self.n_init)
+        cluster_ids = self.kmeans_.fit_predict(X)
+        fallback = self.classes_[np.argmax(np.bincount(np.searchsorted(self.classes_, y)))]
+        self.cluster_to_label_ = {}
+        for c in range(self.n_clusters):
+            mask = cluster_ids == c
+            if not mask.any():
+                self.cluster_to_label_[c] = fallback
+                continue
+            values, counts = np.unique(y[mask], return_counts=True)
+            self.cluster_to_label_[c] = values[np.argmax(counts)]
+        return self
+
+    def predict(self, X):  # noqa: D102
+        cluster_ids = self.kmeans_.predict(X)
+        return np.array([self.cluster_to_label_[c] for c in cluster_ids])
+
+
 def _riemann_lda(sfreq: float, bands, random_state: int, align: str | None = None) -> Pipeline:
     return Pipeline(
         [
@@ -289,6 +330,17 @@ def _riemann_centroid(sfreq: float, bands, align: str | None = None) -> Pipeline
             ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas", align=align)),
             ("scale", StandardScaler()),
             ("centroid", NearestCentroid()),
+        ]
+    )
+
+
+def _riemann_kmeans(sfreq: float, bands, random_state: int, align: str | None = None) -> Pipeline:
+    """Classic K-Means clustering (n_clusters=4), scored via cluster-to-label voting."""
+    return Pipeline(
+        [
+            ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas", align=align)),
+            ("scale", StandardScaler()),
+            ("kmeans", KMeansVoteClassifier(n_clusters=4, random_state=random_state)),
         ]
     )
 
@@ -367,6 +419,10 @@ _DECODER_FACTORIES: dict[str, "callable"] = {
     # Experiment: clustering-style classifier -- nearest Euclidean centroid per
     # class on EA-aligned tangent-space features, instead of LDA/LR.
     "riemann_ea_centroid": lambda sfreq, rs: _riemann_centroid(sfreq, RIEMANN_BANDS, align="euclid"),
+    # Experiment: classic unsupervised K-Means (no labels used to place cluster
+    # centers) on EA-aligned tangent-space features, scored via majority-vote
+    # cluster-to-label mapping -- distinct from the supervised centroid above.
+    "riemann_ea_kmeans": lambda sfreq, rs: _riemann_kmeans(sfreq, RIEMANN_BANDS, rs, align="euclid"),
     # Experiment: align both ensemble members instead of just the Riemann branch.
     "riemann_ea_fbcsp_ea_vote": lambda sfreq, rs: VotingClassifier(
         estimators=[
