@@ -23,6 +23,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.ensemble import VotingClassifier
 from sklearn.feature_selection import SelectKBest, mutual_info_classif
 from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import NearestCentroid
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -75,6 +76,25 @@ class BandPass(BaseEstimator, TransformerMixin):
         return _bandpass(np.asarray(X, dtype=np.float64), self.sfreq, self.low, self.high)
 
 
+def _euclidean_align_ref(X: np.ndarray) -> np.ndarray:
+    """Inverse-square-root whitening matrix for Euclidean Alignment (He & Wu 2020).
+
+    ``X`` is ``(trials, channels, samples)``. Transforming each trial as
+    ``ref_inv_sqrt @ X_i`` recenters the batch's mean spatial covariance to the
+    identity, cancelling session-specific covariance shift.
+    """
+    from pyriemann.estimation import Covariances
+    from pyriemann.utils.base import invsqrtm
+    from pyriemann.utils.mean import mean_covariance
+
+    covs = Covariances(estimator="oas").fit_transform(X)
+    return invsqrtm(mean_covariance(covs, metric="euclid"))
+
+
+def _apply_align(X: np.ndarray, ref_inv_sqrt: np.ndarray) -> np.ndarray:
+    return np.einsum("ij,tjk->tik", ref_inv_sqrt, X)
+
+
 class FBCSP(BaseEstimator, TransformerMixin):
     """Filter Bank Common Spatial Pattern feature extractor.
 
@@ -83,24 +103,33 @@ class FBCSP(BaseEstimator, TransformerMixin):
     ``SelectKBest`` step in the pipeline.
     """
 
-    def __init__(self, sfreq: float, bands=DEFAULT_BANDS, n_components: int = 4):
+    def __init__(self, sfreq: float, bands=DEFAULT_BANDS, n_components: int = 4, align: str | None = None):
         self.sfreq = sfreq
         self.bands = bands
         self.n_components = n_components
+        self.align = align  # None | "euclid" -- signal-space EA before CSP, mirroring riemann_ea
 
     def fit(self, X, y):  # noqa: D102
         self.csps_ = []
         for low, high in self.bands:
             Xb = _bandpass(X, self.sfreq, low, high)
+            if self.align:
+                Xb = _apply_align(Xb, _euclidean_align_ref(Xb))
             csp = CSP(n_components=self.n_components, reg="ledoit_wolf", log=True, norm_trace=False)
             csp.fit(Xb, y)
             self.csps_.append(csp)
         return self
 
     def transform(self, X):  # noqa: D102
+        # Transductive, like FilterBankTangentSpace._recenter: the reference is
+        # re-estimated from whatever batch is passed, so train (T) and eval (E)
+        # each get recentered by their own mean independently. Not valid for
+        # single-trial streaming prediction -- see FilterBankTangentSpace docstring.
         feats = []
         for (low, high), csp in zip(self.bands, self.csps_):
             Xb = _bandpass(X, self.sfreq, low, high)
+            if self.align:
+                Xb = _apply_align(Xb, _euclidean_align_ref(Xb))
             feats.append(csp.transform(Xb))
         return np.concatenate(feats, axis=1)
 
@@ -247,6 +276,33 @@ def _riemann_lr(sfreq: float, bands, random_state: int, align: str | None = None
     )
 
 
+def _riemann_centroid(sfreq: float, bands, align: str | None = None) -> Pipeline:
+    """Nearest-centroid classifier on (optionally aligned) tangent-space features.
+
+    Where MDM clusters by Riemannian distance between covariance matrices, this
+    instead computes one Euclidean centroid per class in the *tangent-space*
+    feature space (after standardizing) and classifies by nearest centroid --
+    a cheap clustering-style baseline to compare against the LDA/LR heads.
+    """
+    return Pipeline(
+        [
+            ("fbts", FilterBankTangentSpace(sfreq, bands, estimator="oas", align=align)),
+            ("scale", StandardScaler()),
+            ("centroid", NearestCentroid()),
+        ]
+    )
+
+
+def _fbcsp_lda(sfreq: float, k: int, random_state: int, align: str | None = None) -> Pipeline:
+    return Pipeline(
+        [
+            ("fbcsp", FBCSP(sfreq, n_components=4, align=align)),
+            ("select", SelectKBest(mutual_info_classif, k=k)),
+            ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
+        ]
+    )
+
+
 # Registry of decoder factories: name -> callable(sfreq, random_state) -> estimator.
 # Keeping every decoder here means ``DECODER_NAMES`` (and the CLI choices derived
 # from it) stay in sync automatically.
@@ -258,13 +314,13 @@ _DECODER_FACTORIES: dict[str, "callable"] = {
             ("lda", LinearDiscriminantAnalysis()),
         ]
     ),
-    "fbcsp": lambda sfreq, rs: Pipeline(
-        [
-            ("fbcsp", FBCSP(sfreq, n_components=4)),
-            ("select", SelectKBest(mutual_info_classif, k=24)),
-            ("lda", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")),
-        ]
-    ),
+    "fbcsp": lambda sfreq, rs: _fbcsp_lda(sfreq, 24, rs),
+    # Experiment: fewer MIBIF-selected features than the default k=24.
+    "fbcsp_k16": lambda sfreq, rs: _fbcsp_lda(sfreq, 16, rs),
+    "fbcsp_k12": lambda sfreq, rs: _fbcsp_lda(sfreq, 12, rs),
+    # Experiment: Euclidean Alignment on the raw signal before CSP, mirroring
+    # riemann_ea -- FBCSP previously got no session-drift correction at all.
+    "fbcsp_ea": lambda sfreq, rs: _fbcsp_lda(sfreq, 24, rs, align="euclid"),
     "riemann": lambda sfreq, rs: _riemann_lda(sfreq, RIEMANN_BANDS, rs),
     "riemann_wide": lambda sfreq, rs: _riemann_lda(sfreq, DEFAULT_BANDS, rs),
     "riemann_lr": lambda sfreq, rs: _riemann_lr(sfreq, RIEMANN_BANDS, rs),
@@ -295,6 +351,38 @@ _DECODER_FACTORIES: dict[str, "callable"] = {
         estimators=[
             ("riemann_ra", build_decoder("riemann_ra", sfreq, rs)),
             ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
+        ],
+        voting="soft",
+    ),
+    # Experiment: weight the best ensemble towards Riemann (0.7) over FBCSP (0.3)
+    # instead of the default equal (1, 1) soft vote.
+    "riemann_ea_fbcsp_vote_w70": lambda sfreq, rs: VotingClassifier(
+        estimators=[
+            ("riemann_ea", build_decoder("riemann_ea", sfreq, rs)),
+            ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
+        ],
+        voting="soft",
+        weights=[0.7, 0.3],
+    ),
+    # Experiment: clustering-style classifier -- nearest Euclidean centroid per
+    # class on EA-aligned tangent-space features, instead of LDA/LR.
+    "riemann_ea_centroid": lambda sfreq, rs: _riemann_centroid(sfreq, RIEMANN_BANDS, align="euclid"),
+    # Experiment: align both ensemble members instead of just the Riemann branch.
+    "riemann_ea_fbcsp_ea_vote": lambda sfreq, rs: VotingClassifier(
+        estimators=[
+            ("riemann_ea", build_decoder("riemann_ea", sfreq, rs)),
+            ("fbcsp_ea", build_decoder("fbcsp_ea", sfreq, rs)),
+        ],
+        voting="soft",
+    ),
+    # Experiment: three-way vote keeping both the unaligned FBCSP (for the
+    # decorrelated errors that made the original vote work) and the aligned
+    # fbcsp_ea (for its own standalone gain), alongside riemann_ea.
+    "riemann_ea_fbcsp_dual_vote": lambda sfreq, rs: VotingClassifier(
+        estimators=[
+            ("riemann_ea", build_decoder("riemann_ea", sfreq, rs)),
+            ("fbcsp", build_decoder("fbcsp", sfreq, rs)),
+            ("fbcsp_ea", build_decoder("fbcsp_ea", sfreq, rs)),
         ],
         voting="soft",
     ),

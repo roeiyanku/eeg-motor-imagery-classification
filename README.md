@@ -32,6 +32,9 @@ A **Riemannian-geometry** decoder with **session alignment**, ensembled with FBC
 | `fgmdm` (filter-bank geodesic MDM) | 0.703 | 0.604 |
 | `fbcsp` (reproduces the 2008 method) | 0.675 | 0.566 |
 | `shallow_convnet` (best deep net) | 0.627 | 0.503 |
+| `random_forest` (CSP + random forest) | 0.622 | 0.496 |
+| `svm` (CSP + RBF SVM) | 0.620 | 0.493 |
+| `logistic_regression` (CSP + logistic regression) | 0.616 | 0.488 |
 | `mdm` (filter-bank MDM) | 0.595 | 0.460 |
 | — *2008 winner (Ang et al., FBCSP)* | — | *0.57* |
 
@@ -148,5 +151,6 @@ docs/         PROJECT_HISTORY.md, PRESENTATION.md
 
 ## 📚 Docs
 
+- **[docs/FINAL_PROJECT_REPORT_HE.md](docs/FINAL_PROJECT_REPORT_HE.md)** — final Hebrew submission report: dataset, research questions, code summary, algorithms, results, challenges, and analysis.
 - **[docs/PROJECT_HISTORY.md](docs/PROJECT_HISTORY.md)** — detailed project narrative (Hebrew): research questions, every experiment, results, and challenges.
 - **[docs/PRESENTATION.md](docs/PRESENTATION.md)** — a timed 10-minute slide-by-slide talk script.
