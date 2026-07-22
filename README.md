@@ -147,7 +147,7 @@ data/         BCICIV_2a_gdf/ (gitignored), true_labels/
 docs/         PROJECT_HISTORY.md, PRESENTATION.md
 ```
 
----
+
 
 ## 📚 Docs
 
